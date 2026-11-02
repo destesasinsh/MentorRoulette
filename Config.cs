@@ -55,7 +55,7 @@ public sealed class Config : IPluginConfiguration
     // ---------- 组队同步 ----------
 
     public bool   SyncEnabled    { get; set; }
-    public string SyncServerUrl  { get; set; } = "http://127.0.0.1:8787";
+    public string SyncServerUrl  { get; set; } = SyncDefaults.ServerUrl;
     public string SyncRoomCode   { get; set; } = string.Empty;
     public string SyncClientId   { get; set; } = string.Empty;
     public string SyncClientName { get; set; } = string.Empty;

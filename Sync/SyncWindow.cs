@@ -48,12 +48,20 @@ internal sealed class SyncWindow : Window
 
     private void DrawConnection(Config cfg)
     {
-        ImGui.SetNextItemWidth(260);
-        string url = cfg.SyncServerUrl;
-        if (ImGui.InputText("服务器地址", ref url, 256))
+        string url = string.IsNullOrWhiteSpace(cfg.SyncServerUrl) ? SyncDefaults.ServerUrl : cfg.SyncServerUrl;
+
+        if (string.IsNullOrWhiteSpace(url))
         {
-            cfg.SyncServerUrl = url;
-            cfg.Save();
+            ImGui.TextColored(new Vector4(1f, 0.5f, 0.5f, 1f), "服务器未配置");
+            ImGui.SameLine();
+            ImGui.TextDisabled("（在配置文件的 SyncServerUrl 里填）");
+        }
+        else
+        {
+            ImGui.TextDisabled($"服务器：{url}");
+            ImGui.SameLine();
+            if (ImGui.Button("复制##copyServer"))
+                ImGui.SetClipboardText(url);
         }
 
         ImGui.SetNextItemWidth(160);

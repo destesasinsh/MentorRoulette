@@ -57,13 +57,17 @@ internal sealed class SyncCoordinator
 
     internal bool IsHost => this.cfg.SyncEnabled && this.cfg.SyncIsHost;
 
+    /// <summary>配置文件里的地址优先，没有就用内置默认值。</summary>
+    private string ServerUrl =>
+        string.IsNullOrWhiteSpace(this.cfg.SyncServerUrl) ? SyncDefaults.ServerUrl : this.cfg.SyncServerUrl;
+
     internal string MyRole => this.myRole;
 
     // ---------- 连接 ----------
 
     internal async Task<(bool ok, string msg)> CreateRoomAsync(string name)
     {
-        this.client.SetServer(this.cfg.SyncServerUrl);
+        this.client.SetServer(this.ServerUrl);
         CreateRoomResponse? res = await this.client.CreateRoomAsync(name).ConfigureAwait(false);
         if (res == null || string.IsNullOrEmpty(res.Code))
             return (false, this.client.LastError.Length > 0 ? this.client.LastError : "创建失败");
@@ -80,7 +84,7 @@ internal sealed class SyncCoordinator
 
     internal async Task<(bool ok, string msg)> JoinRoomAsync(string code)
     {
-        this.client.SetServer(this.cfg.SyncServerUrl);
+        this.client.SetServer(this.ServerUrl);
         RoomState? st = await this.client.JoinAsync(code, this.cfg.SyncClientId, this.cfg.SyncClientName)
                                  .ConfigureAwait(false);
         if (st == null)
