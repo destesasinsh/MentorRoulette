@@ -159,6 +159,9 @@ internal sealed class SyncCoordinator
             return;
         }
 
+        // 匹配弹出框：只要连上房间就无条件确认（队长/队友、任何阶段都一样），避免漏确认被踢出队列
+        QueueController.AcceptPop();
+
         this.TrackDutyState();
         this.EvaluateQueue();
         this.UpdateStatus();
@@ -316,10 +319,6 @@ internal sealed class SyncCoordinator
             return;
 
         if (this.inDuty)
-            return;
-
-        // 匹配弹出框：不论队长/队友、不论哪个角色都要点确定
-        if (QueueController.AcceptPop())
             return;
 
         // 队伍里非队长不主动排队，跟着队长进队列
