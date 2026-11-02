@@ -32,6 +32,8 @@ internal sealed class SyncCoordinator
     private DateTime lastReport   = DateTime.MinValue;
     private DateTime lastHostTick = DateTime.MinValue;
     private DateTime lastSignalAt = DateTime.MinValue;
+    private DateTime roundEndedAt = DateTime.MinValue;
+    private bool     roundClosed  = false;
 
     private bool   inDuty;
     private uint   enteredTerritory;
@@ -316,6 +318,10 @@ internal sealed class SyncCoordinator
         if (this.inDuty)
             return;
 
+        // 匹配弹出框：不论队长/队友、不论哪个角色都要点确定
+        if (QueueController.AcceptPop())
+            return;
+
         // 队伍里非队长不主动排队，跟着队长进队列
         if (this.myRole == "party" && QueueController.PartySize > 0 && !QueueController.IsPartyLeader)
         {
@@ -324,9 +330,6 @@ internal sealed class SyncCoordinator
 
             return;
         }
-
-        if (QueueController.AcceptPop())
-            return;
 
         if (QueueController.InQueue)
         {
@@ -463,52 +466,94 @@ internal sealed class SyncCoordinator
 
         if (this.room.Phase == "queueing")
         {
-            bool anyWrong = this.room.Clients.Values.Any(c =>
-                                c.Online && c.Report is { Role: "roulette", State: "in_duty" } &&
-                                c.Report.Territory != 0 && c.Report.Territory != c.Report.Target);
+            if (this.roundClosed)
+                return;
 
             int okCount = this.room.Clients.Values.Count(c =>
                               c.Online && c.Report is { Role: "roulette", State: "in_duty" } &&
                               c.Report.Territory != 0 && c.Report.Territory == c.Report.Target);
 
-            if (!anyWrong && okCount >= Math.Max(1, opt.SuccessMin))
+            bool anyoneInDuty = this.room.Clients.Values.Any(c => c.Online && c.Report is { State: "in_duty" });
+
+            long maxPenaltyMs = this.room.Clients.Values
+                                    .Where(c => c.Online && c.Report != null)
+                                    .Select(c => c.Report!.PenaltyUntil)
+                                    .DefaultIfEmpty(0).Max();
+
+            // 1) 有人进错本退了（出现惩罚），且场上已经没人在本里 → 本轮判失败，收尾
+            if (maxPenaltyMs > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() && !anyoneInDuty)
             {
-                Service.Log.Info("[Sync] round success");
-                this.lastSignalAt = DateTime.UtcNow;
-                _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "next");
+                Service.Log.Info("[Sync] round failed (someone left early), aborting");
+                this.CloseRound("abort");
                 return;
             }
 
-            bool timeout = DateTime.UtcNow >
-                           DateTimeOffset.FromUnixTimeMilliseconds(this.room.StartAt).UtcDateTime
-                                         .AddSeconds(opt.QueueTimeoutSec);
+            // 2) 成功
+            if (okCount >= Math.Max(1, opt.SuccessMin))
+            {
+                Service.Log.Info("[Sync] round success");
+                this.CloseRound("next");
+                return;
+            }
 
-            bool nothingHappening = this.room.Clients.Values.All(c =>
-                                        c.Report == null || c.Report.State is "idle" or "queued");
+            // 3) 超时且没有任何进展
+            DateTime startAt = DateTimeOffset.FromUnixTimeMilliseconds(this.room.StartAt).UtcDateTime;
+            bool timeout = DateTime.UtcNow > startAt.AddSeconds(opt.QueueTimeoutSec);
+            bool nothingHappening = this.room.Clients.Values.All(c => c.Report is null or { State: "idle" or "queued" });
 
             if (timeout && nothingHappening)
             {
                 Service.Log.Info("[Sync] queue timeout, aborting round");
-                this.lastSignalAt = DateTime.UtcNow;
-                _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "abort");
+                this.CloseRound("abort");
             }
 
             return;
         }
 
-        if (this.room.Phase == "idle" && opt.AutoLoop && this.room.Round <= opt.MaxRounds)
-        {
-            bool allReady = this.room.Clients.Values.Where(c => c.Online)
-                                       .All(c => c.Report is { State: "idle" });
+        // 空闲：自动下一轮
+        if (this.room.Phase != "idle" || !this.roundClosed)
+            return;
 
-            if (allReady && DateTime.UtcNow >= this.EffectivePenalty())
+        if (!opt.AutoLoop)
+            return;
+
+        if (this.room.Round > opt.MaxRounds)
+        {
+            if ((DateTime.UtcNow - this.lastSignalAt).TotalSeconds > 30)
             {
-                Service.Log.Info("[Sync] auto loop: starting next round");
                 this.lastSignalAt = DateTime.UtcNow;
-                _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "next");
-                _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "start");
+                Service.Log.Info($"[Sync] 已到轮次上限 {opt.MaxRounds}，停止自动循环");
             }
+
+            return;
         }
+
+        DateTime earliest = this.roundEndedAt.AddSeconds(Math.Max(0, opt.RoundIntervalSec));
+        DateTime penalty  = this.EffectivePenalty();
+
+        if (penalty > earliest)
+            earliest = penalty;
+
+        if (DateTime.UtcNow < earliest)
+            return;
+
+        bool allReady = this.room.Clients.Values.Where(c => c.Online).All(c => c.Report is { State: "idle" });
+        if (!allReady)
+            return;
+
+        Service.Log.Info($"[Sync] auto loop: round {this.room.Round} -> {this.room.Round + 1}");
+        this.lastSignalAt = DateTime.UtcNow;
+        this.roundClosed  = false;
+        _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "next");
+        _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "start");
+    }
+
+    private void CloseRound(string signal)
+    {
+        this.lastSignalAt = DateTime.UtcNow;
+        this.roundClosed  = true;
+        this.roundEndedAt = DateTime.UtcNow;
+        _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, signal);
     }
 
     // ---------- 状态 ----------
@@ -551,12 +596,12 @@ internal sealed class SyncCoordinator
         if (this.room == null || !this.cfg.SyncIsHost)
             return;
 
-        long startAt = DateTimeOffset.UtcNow.AddSeconds(3).ToUnixTimeMilliseconds();
+        this.roundClosed = false;
         _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "start");
         _ = this.client.ConfigAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken,
                                     this.cfg.SyncAssignments, this.cfg.SyncOptions, this.cfg.SyncStagger);
         this.lastSignalAt = DateTime.UtcNow;
-        Service.Log.Info($"[Sync] start round, startAt={startAt}");
+        Service.Log.Info($"[Sync] start round {this.room.Round}");
     }
 
     internal void Abort()

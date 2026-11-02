@@ -39,6 +39,7 @@ public sealed class RoomOptions
     [JsonPropertyName("queueTimeoutSec")] public int QueueTimeoutSec { get; set; } = 300;
     [JsonPropertyName("autoLoop")]        public bool AutoLoop { get; set; }
     [JsonPropertyName("maxRounds")]       public int MaxRounds { get; set; } = 20;
+    [JsonPropertyName("roundIntervalSec")] public int RoundIntervalSec { get; set; } = 10;
     [JsonPropertyName("postEntry")]       public PostEntry PostEntry { get; set; } = new();
 }
 

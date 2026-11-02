@@ -295,9 +295,18 @@ internal sealed class SyncWindow : Window
         ImGui.SameLine();
         int maxRounds = opt.MaxRounds;
         ImGui.SetNextItemWidth(100);
-        if (ImGui.InputInt("最多轮数", ref maxRounds))
+        if (ImGui.InputInt("轮次上限", ref maxRounds))
         {
             opt.MaxRounds = Math.Clamp(maxRounds, 1, 999);
+            cfg.Save();
+        }
+
+        ImGui.SameLine();
+        int interval = opt.RoundIntervalSec;
+        ImGui.SetNextItemWidth(100);
+        if (ImGui.InputInt("每轮间隔 (秒)", ref interval))
+        {
+            opt.RoundIntervalSec = Math.Clamp(interval, 0, 600);
             cfg.Save();
         }
 
@@ -324,8 +333,25 @@ internal sealed class SyncWindow : Window
 
     private void DrawStatus()
     {
+        RoomState? room = this.Sync.Room;
+
         ImGui.Text($"我的角色：{this.Sync.MyRole}");
-        ImGui.SameLine();
+
+        if (room != null)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled($"第 {room.Round} / {room.Options.MaxRounds} 轮");
+
+            ImGui.SameLine();
+            ImGui.TextDisabled(room.Phase switch
+            {
+                "queueing" => "排队中",
+                "armed"    => "已下发配置",
+                "idle"     => "待机",
+                _          => room.Phase,
+            });
+        }
+
         ImGui.TextDisabled(this.Sync.Status);
 
         DateTime penalty = this.Sync.PenaltyUntil;
