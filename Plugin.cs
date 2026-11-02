@@ -49,7 +49,7 @@ public sealed class Plugin : IDalamudPlugin
 
         Service.Commands.AddHandler("/mentor", new CommandInfo(this.OnCommand)
         {
-            HelpMessage = "导随助手：/mentor 打开设置；/mentor start|stop|status。",
+            HelpMessage = "导随助手：/mentor 打开组队同步；/mentor solo 单人设置；/mentor start|stop|status。",
         });
 
         if (this.Config.Enabled)
@@ -97,6 +97,9 @@ public sealed class Plugin : IDalamudPlugin
         {
             case "":
             case "config":
+                this.SyncWindow.IsOpen = true;
+                break;
+            case "solo":
                 this.Window.IsOpen = true;
                 break;
             case "start":

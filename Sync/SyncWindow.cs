@@ -37,6 +37,9 @@ internal sealed class SyncWindow : Window
     {
         Config cfg = this.Config;
 
+        if (DutyCatalog.Entries.Count == 0)
+            DutyCatalog.EnsureLoaded();
+
         this.DrawConnection(cfg);
         ImGui.Separator();
         this.DrawAssignments(cfg);
@@ -125,6 +128,49 @@ internal sealed class SyncWindow : Window
 
         ImGui.Text("成员分配");
 
+        ImGui.SameLine();
+        if (ImGui.Button("快捷：讨伐彷徨死灵！"))
+        {
+            DutyEntry? preset = DutyCatalog.Get(190);
+            if (preset != null)
+            {
+                foreach (Assignment a in cfg.SyncAssignments.Values.Where(x => x.Role == "party"))
+                {
+                    a.Territory = preset.TerritoryId;
+                    a.Cfc       = preset.CfcId;
+                }
+
+                cfg.Save();
+                Service.Log.Info($"[Sync] preset applied: {preset.Name} ({preset.TerritoryId})");
+            }
+            else
+            {
+                Service.Log.Warning("[Sync] 没找到 190 号副本，先刷新副本列表");
+            }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("全部设为组队排本"))
+        {
+            foreach (ClientBox c in this.Sync.Room?.Clients.Values ?? Enumerable.Empty<ClientBox>())
+            {
+                if (!cfg.SyncAssignments.TryGetValue(c.Id, out Assignment? a))
+                {
+                    a = new Assignment();
+                    cfg.SyncAssignments[c.Id] = a;
+                }
+
+                a.Role    = "party";
+                a.PartyId = string.IsNullOrEmpty(a.PartyId) ? "A" : a.PartyId;
+            }
+
+            cfg.Save();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("单人导随设置…"))
+            this.plugin.Window.IsOpen = true;
+
         List<ClientBox> clients = this.Sync.Room?.Clients.Values.OrderBy(c => c.Id).ToList() ?? [];
         if (clients.Count == 0)
         {
@@ -159,11 +205,19 @@ internal sealed class SyncWindow : Window
             if (a.Role == "party")
             {
                 ImGui.SameLine();
-                string dutyName = a.Territory == 0 ? "选择副本…" : DutyCatalog.Get(a.Territory)?.Name ?? a.Territory.ToString();
-                if (ImGui.Button($"{dutyName}##pick{c.Id}"))
+
+                string dutyName = a.Territory == 0
+                                      ? "未选择"
+                                      : DutyCatalog.Get(a.Territory)?.Name ?? $"#{a.Territory}";
+
+                ImGui.TextColored(a.Territory == 0 ? new Vector4(1f, 0.7f, 0.3f, 1f) : new Vector4(0.5f, 0.9f, 0.5f, 1f),
+                                  $"副本：{dutyName} ({a.Territory})");
+
+                ImGui.SameLine();
+                if (ImGui.Button($"改##pick{c.Id}"))
                 {
-                    this.dutyPickerFor  = c.Id;
-                    this.dutySearch     = string.Empty;
+                    this.dutyPickerFor = c.Id;
+                    this.dutySearch    = string.Empty;
                     ImGui.OpenPopup("dutyPicker");
                 }
 
@@ -221,7 +275,7 @@ internal sealed class SyncWindow : Window
 
                 string label = duty.HasPath ? $"{duty.Name}##{duty.TerritoryId}" : $"{duty.Name}（无 AD 路径）##{duty.TerritoryId}";
 
-                if (!ImGui.Selectable(label))
+                if (!ImGui.Selectable(label, a.Territory == duty.TerritoryId))
                     continue;
 
                 a.Territory = duty.TerritoryId;
@@ -317,15 +371,16 @@ internal sealed class SyncWindow : Window
             cfg.Save();
         }
 
-        if (opt.PostEntry.Mode is "command" or "both")
+        if (opt.PostEntry.Mode is "command" or "both" || opt.PostEntry.Commands.Length > 0)
         {
-            ImGui.SetNextItemWidth(260);
-            string command = opt.PostEntry.Command;
-            if (ImGui.InputText("命令（可含 /）", ref command, 256))
+            string commands = opt.PostEntry.Commands;
+            if (ImGui.InputTextMultiline("进本后执行的命令（一行一条，按顺序发）", ref commands, 4096, new Vector2(420, 90)))
             {
-                opt.PostEntry.Command = command;
+                opt.PostEntry.Commands = commands;
                 cfg.Save();
             }
+
+            ImGui.TextDisabled("只在「进对了本」时执行；# 开头是注释；不带 / 会自动补上");
         }
     }
 

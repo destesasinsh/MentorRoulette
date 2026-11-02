@@ -35,6 +35,9 @@ internal sealed class SyncCoordinator
     private DateTime roundEndedAt = DateTime.MinValue;
     private bool     roundClosed  = false;
 
+    private readonly System.Collections.Generic.Queue<string> pendingCommands = new();
+    private DateTime nextCommandAt = DateTime.MinValue;
+
     private bool   inDuty;
     private uint   enteredTerritory;
     private bool   dutyCompleted;
@@ -190,6 +193,8 @@ internal sealed class SyncCoordinator
             this.lastReport = DateTime.UtcNow;
             this.SendReport();
         }
+
+        this.FlushCommands();
 
         if (this.IsHost && (DateTime.UtcNow - this.lastHostTick).TotalMilliseconds > 1000)
         {
@@ -444,14 +449,31 @@ internal sealed class SyncCoordinator
         if (this.postEntryDone || this.room == null)
             return;
 
+        // 只有进对了本才执行（没设目标就都算对）
+        if (this.myTarget != 0 && territory != this.myTarget)
+            return;
+
         this.postEntryDone = true;
         PostEntry post = this.room.Options.PostEntry;
 
-        if (post.Mode is "command" or "both" && post.Command.Length > 0)
+        if (post.Mode is "command" or "both" || post.Commands.Length > 0 || post.Command.Length > 0)
         {
-            string cmd = post.Command.StartsWith('/') ? post.Command : "/" + post.Command;
-            Service.Log.Info($"[Sync] post-entry command: {cmd}");
-            Service.Commands.ProcessCommand(cmd);
+            string raw = post.Commands.Length > 0 ? post.Commands : post.Command;
+
+            foreach (string line in raw.Split('\n'))
+            {
+                string cmd = line.Trim();
+                if (cmd.Length == 0 || cmd.StartsWith('#'))
+                    continue;
+
+                if (!cmd.StartsWith('/'))
+                    cmd = "/" + cmd;
+
+                this.pendingCommands.Enqueue(cmd);
+            }
+
+            if (this.pendingCommands.Count > 0)
+                Service.Log.Info($"[Sync] post-entry: {this.pendingCommands.Count} 条命令排队");
         }
 
         if (post.Mode is "autoduty" or "both")
@@ -459,6 +481,17 @@ internal sealed class SyncCoordinator
             Service.Log.Info($"[Sync] post-entry AutoDuty.Run({territory})");
             this.ipc.Run(territory, 1, this.cfg.BareMode);
         }
+    }
+
+    private void FlushCommands()
+    {
+        if (this.pendingCommands.Count == 0 || DateTime.UtcNow < this.nextCommandAt)
+            return;
+
+        string cmd = this.pendingCommands.Dequeue();
+        this.nextCommandAt = DateTime.UtcNow.AddMilliseconds(600);
+        Service.Log.Info($"[Sync] send command: {cmd}");
+        Service.Commands.ProcessCommand(cmd);
     }
 
     internal void OnDutyCompleted() => this.dutyCompleted = true;

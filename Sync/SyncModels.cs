@@ -47,6 +47,8 @@ public sealed class PostEntry
 {
     [JsonPropertyName("mode")]      public string Mode { get; set; } = "nothing"; // nothing | command | autoduty | both
     [JsonPropertyName("command")]   public string Command { get; set; } = string.Empty;
+    /// <summary>进本后要执行的命令，一行一条，按顺序发。</summary>
+    [JsonPropertyName("commands")]  public string Commands { get; set; } = string.Empty;
 }
 
 public sealed class ClientBox
