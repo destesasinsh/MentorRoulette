@@ -4,6 +4,7 @@ using System;
 using System.Linq;
 using Dalamud.Game.Command;
 using Dalamud.Game.DutyState;
+using MentorRoulette.Sync;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
@@ -14,10 +15,12 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly WindowSystem windowSystem = new("MentorRoulette");
 
-    internal Config       Config  { get; }
-    internal AutoDutyIpc  Ipc     { get; }
-    internal Manager      Manager { get; }
-    internal ConfigWindow Window  { get; }
+    internal Config          Config     { get; }
+    internal AutoDutyIpc     Ipc        { get; }
+    internal Manager         Manager    { get; }
+    internal ConfigWindow    Window     { get; }
+    internal SyncCoordinator Sync       { get; }
+    internal SyncWindow      SyncWindow { get; }
 
     private DateTime lastTick = DateTime.MinValue;
 
@@ -30,10 +33,15 @@ public sealed class Plugin : IDalamudPlugin
         this.Config = pi.GetPluginConfig() as Config ?? new Config();
         this.Ipc    = new AutoDutyIpc(pi);
 
-        this.Manager = new Manager(this.Config, this.Ipc);
-        this.Window  = new ConfigWindow(this);
+        this.Manager    = new Manager(this.Config, this.Ipc);
+        this.Window     = new ConfigWindow(this);
+        this.Sync       = new SyncCoordinator(this.Config, this.Ipc);
+        this.SyncWindow = new SyncWindow(this);
+
+        this.Config.EnsureClientId();
 
         this.windowSystem.AddWindow(this.Window);
+        this.windowSystem.AddWindow(this.SyncWindow);
 
         pi.UiBuilder.Draw         += this.Draw;
         pi.UiBuilder.OpenConfigUi += this.OpenConfig;
@@ -69,7 +77,11 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OpenConfig() => this.Window.IsOpen = true;
 
-    private void OnDutyCompleted(IDutyStateEventArgs args) => this.Manager.OnDutyCompleted();
+    private void OnDutyCompleted(IDutyStateEventArgs args)
+    {
+        this.Manager.OnDutyCompleted();
+        this.Sync.OnDutyCompleted();
+    }
 
     private void OnFrameworkUpdate(IFramework framework)
     {
@@ -78,6 +90,7 @@ public sealed class Plugin : IDalamudPlugin
 
         this.lastTick = DateTime.UtcNow;
         this.Manager.Tick();
+        this.Sync.Tick();
     }
 
     private void OnCommand(string command, string args)
@@ -96,6 +109,9 @@ public sealed class Plugin : IDalamudPlugin
                 break;
             case "cancel":
                 this.Manager.CancelLeave();
+                break;
+            case "sync":
+                this.SyncWindow.IsOpen = !this.SyncWindow.IsOpen;
                 break;
             case "dump":
                 Service.Log.Info(RouletteQueue.DumpList());

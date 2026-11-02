@@ -3,6 +3,7 @@ namespace MentorRoulette;
 using System;
 using System.Collections.Generic;
 using Dalamud.Configuration;
+using MentorRoulette.Sync;
 
 public enum RunMode : byte
 {
@@ -50,6 +51,32 @@ public sealed class Config : IPluginConfiguration
 
     /// <summary>要排的随机任务（ContentRoulette）。导师随机 = 9。</summary>
     public uint RouletteId { get; set; } = 9;
+
+    // ---------- 组队同步 ----------
+
+    public bool   SyncEnabled    { get; set; }
+    public string SyncServerUrl  { get; set; } = "http://127.0.0.1:8787";
+    public string SyncRoomCode   { get; set; } = string.Empty;
+    public string SyncClientId   { get; set; } = string.Empty;
+    public string SyncClientName { get; set; } = string.Empty;
+    public string SyncHostToken  { get; set; } = string.Empty;
+    public bool   SyncIsHost     { get; set; }
+
+    public Dictionary<string, Assignment> SyncAssignments { get; set; } = [];
+    public RoomOptions                    SyncOptions     { get; set; } = new();
+    public Stagger                        SyncStagger     { get; set; } = new();
+
+    /// <summary>首次使用时生成一个短客户端 ID。</summary>
+    public string EnsureClientId()
+    {
+        if (string.IsNullOrWhiteSpace(this.SyncClientId))
+            this.SyncClientId = "c-" + Guid.NewGuid().ToString("N")[..6];
+
+        if (string.IsNullOrWhiteSpace(this.SyncClientName))
+            this.SyncClientName = this.SyncClientId;
+
+        return this.SyncClientId;
+    }
 
     // 本次运行统计，不存盘
     [NonSerialized] public int QueuedCount;

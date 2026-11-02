@@ -69,6 +69,11 @@ internal sealed class ConfigWindow : Window, IDisposable
             if (ImGui.Button("停止"))
                 manager.Stop("界面停止");
 
+        ImGui.SameLine();
+
+        if (ImGui.Button("组队同步…"))
+            this.plugin.SyncWindow.IsOpen = true;
+
         if (manager.State == State.Grace)
         {
             ImGui.SameLine();

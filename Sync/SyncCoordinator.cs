@@ -1,0 +1,569 @@
+namespace MentorRoulette.Sync;
+
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+/// <summary>
+/// 组队同步：轮询房间状态 → 按角色自动排队 / 退本 / 上报，队长端负责开排、中止、下一轮。
+/// </summary>
+internal sealed class SyncCoordinator
+{
+    private readonly Config         cfg;
+    private readonly AutoDutyIpc    ipc;
+    private readonly SyncClient     client = new();
+    private readonly ExitDuty       exit   = new();
+
+    private CancellationTokenSource? cts;
+    private RoomState? pending;
+    private RoomState? room;
+
+    private long appliedSeq;
+    private int  appliedRound;
+    private bool hasAssignment;
+
+    private string myRole      = "none";
+    private uint   myTarget    = 0;   // 目标 territory
+    private uint   myCfc       = 0;
+    private DateTime myStartAt = DateTime.MinValue;
+
+    private DateTime lastReport   = DateTime.MinValue;
+    private DateTime lastHostTick = DateTime.MinValue;
+    private DateTime lastSignalAt = DateTime.MinValue;
+
+    private bool   inDuty;
+    private uint   enteredTerritory;
+    private bool   dutyCompleted;
+    private bool   postEntryDone;
+    private bool   queuedByUs;
+    private bool   leftEarly;
+    private DateTime penaltyUntil = DateTime.MinValue;
+
+    internal SyncCoordinator(Config cfg, AutoDutyIpc ipc)
+    {
+        this.cfg = cfg;
+        this.ipc = ipc;
+    }
+
+    internal RoomState? Room => this.room;
+    internal string Status { get; private set; } = "未连接";
+    internal bool   Connected => this.client.Connected && this.room != null;
+    internal string LastError => this.client.LastError;
+    internal DateTime PenaltyUntil => this.penaltyUntil;
+
+    internal bool IsHost => this.cfg.SyncEnabled && this.cfg.SyncIsHost;
+
+    internal string MyRole => this.myRole;
+
+    // ---------- 连接 ----------
+
+    internal async Task<(bool ok, string msg)> CreateRoomAsync(string name)
+    {
+        this.client.SetServer(this.cfg.SyncServerUrl);
+        CreateRoomResponse? res = await this.client.CreateRoomAsync(name).ConfigureAwait(false);
+        if (res == null || string.IsNullOrEmpty(res.Code))
+            return (false, this.client.LastError.Length > 0 ? this.client.LastError : "创建失败");
+
+        this.cfg.SyncRoomCode  = res.Code;
+        this.cfg.SyncHostToken = res.HostToken;
+        this.cfg.SyncIsHost    = true;
+        this.cfg.Save();
+
+        await this.client.JoinAsync(res.Code, this.cfg.SyncClientId, name).ConfigureAwait(false);
+        this.StartLoop();
+        return (true, $"房间 {res.Code}");
+    }
+
+    internal async Task<(bool ok, string msg)> JoinRoomAsync(string code)
+    {
+        this.client.SetServer(this.cfg.SyncServerUrl);
+        RoomState? st = await this.client.JoinAsync(code, this.cfg.SyncClientId, this.cfg.SyncClientName)
+                                 .ConfigureAwait(false);
+        if (st == null)
+            return (false, this.client.LastError.Length > 0 ? this.client.LastError : "加入失败");
+
+        this.cfg.SyncRoomCode = code;
+        this.cfg.SyncIsHost   = false;
+        this.cfg.Save();
+
+        this.room = st;
+        this.StartLoop();
+        return (true, $"已加入 {code}");
+    }
+
+    internal void Disconnect()
+    {
+        this.cts?.Cancel();
+        this.cts?.Dispose();
+        this.cts = null;
+
+        if (this.cfg.SyncRoomCode.Length > 0)
+            _ = this.client.LeaveAsync(this.cfg.SyncRoomCode, this.cfg.SyncClientId);
+
+        this.room = null;
+        this.Status = "未连接";
+    }
+
+    private void StartLoop()
+    {
+        this.cts?.Cancel();
+        this.cts = new CancellationTokenSource();
+
+        CancellationToken token = this.cts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                if (this.cfg.SyncRoomCode.Length > 0)
+                {
+                    RoomState? st = await this.client.PollAsync(this.cfg.SyncRoomCode, this.cfg.SyncClientId)
+                                                     .ConfigureAwait(false);
+                    if (st != null)
+                        Interlocked.Exchange(ref this.pending, st);
+                }
+
+                try
+                {
+                    await Task.Delay(2000, token).ConfigureAwait(false);
+                }
+                catch (TaskCanceledException)
+                {
+                    return;
+                }
+            }
+        }, token);
+    }
+
+    // ---------- 每帧 ----------
+
+    internal void Tick()
+    {
+        if (!this.cfg.SyncEnabled)
+        {
+            this.Status = "未启用";
+            return;
+        }
+
+        RoomState? next = Interlocked.Exchange(ref this.pending, null);
+        if (next != null)
+            this.ApplyState(next);
+
+        if (this.room == null)
+        {
+            this.Status = "未连接";
+            return;
+        }
+
+        this.TrackDutyState();
+        this.EvaluateQueue();
+        this.UpdateStatus();
+
+        if ((DateTime.UtcNow - this.lastReport).TotalMilliseconds > 2000)
+        {
+            this.lastReport = DateTime.UtcNow;
+            this.SendReport();
+        }
+
+        if (this.IsHost && (DateTime.UtcNow - this.lastHostTick).TotalMilliseconds > 1000)
+        {
+            this.lastHostTick = DateTime.UtcNow;
+            this.HostTick();
+        }
+    }
+
+    private void ApplyState(RoomState st)
+    {
+        this.room = st;
+
+        if (st.Round != this.appliedRound)
+        {
+            this.appliedRound = st.Round;
+            this.postEntryDone = false;
+            this.leftEarly     = false;
+        }
+
+        // 分配
+        this.hasAssignment = st.Assignments.TryGetValue(this.cfg.SyncClientId, out Assignment? a);
+        if (this.hasAssignment && a != null)
+        {
+            this.myRole   = a.Role;
+            this.myTarget = a.Territory;
+            this.myCfc    = a.Cfc;
+        }
+        else
+        {
+            this.myRole = "none";
+        }
+
+        // 命令
+        foreach (Command cmd in st.Commands.Where(c => c.Seq > this.appliedSeq).OrderBy(c => c.Seq))
+        {
+            this.appliedSeq = cmd.Seq;
+            this.ApplyCommand(cmd);
+        }
+
+        this.UpdateStartTime();
+    }
+
+    private void ApplyCommand(Command cmd)
+    {
+        switch (cmd.Type)
+        {
+            case "start":
+                this.myStartAt     = DateTimeOffset.FromUnixTimeMilliseconds(this.room!.StartAt).UtcDateTime;
+                this.queuedByUs    = false;
+                this.postEntryDone = false;
+                this.leftEarly     = false;
+                Service.Log.Info($"[Sync] start received, phase={this.room.Phase}, startAt={this.myStartAt:HH:mm:ss}");
+                break;
+
+            case "abort":
+            case "stop":
+            case "reset":
+                this.CancelMyQueue();
+                this.queuedByUs = false;
+                break;
+
+            case "next":
+                this.queuedByUs    = false;
+                this.postEntryDone = false;
+                this.myStartAt     = DateTime.MinValue;
+                break;
+
+            case "leave":
+                if (cmd.Target == null || cmd.Target == this.cfg.SyncClientId)
+                {
+                    if (this.inDuty && !this.exit.Running)
+                        this.exit.Start();
+                }
+
+                break;
+        }
+    }
+
+    private void UpdateStartTime()
+    {
+        if (this.room == null || this.room.Phase != "queueing")
+        {
+            this.myStartAt = DateTime.MinValue;
+            return;
+        }
+
+        int stagger = this.myRole == "party" ? this.room.Stagger.Party : this.room.Stagger.Roulette;
+        this.myStartAt = DateTimeOffset.FromUnixTimeMilliseconds(this.room.StartAt + stagger).UtcDateTime;
+    }
+
+    // ---------- 排队 ----------
+
+    private DateTime EffectivePenalty()
+    {
+        if (this.room == null)
+            return this.penaltyUntil;
+
+        if (this.room.Options.PenaltyMode == "leaver")
+            return this.penaltyUntil;
+
+        // 全员等待：取所有在线端里最晚的惩罚时间
+        long max = this.room.Clients.Values
+                       .Where(c => c.Online && c.Report != null)
+                       .Select(c => c.Report!.PenaltyUntil)
+                       .DefaultIfEmpty(0)
+                       .Max();
+
+        return max > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(max).UtcDateTime : DateTime.MinValue;
+    }
+
+    private void EvaluateQueue()
+    {
+        if (this.room == null)
+            return;
+
+        bool queueingPhase = this.room.Phase == "queueing";
+
+        if (!queueingPhase)
+        {
+            if (this.queuedByUs && QueueController.InQueue)
+                this.CancelMyQueue();
+
+            return;
+        }
+
+        if (this.myRole == "none" || !this.hasAssignment)
+            return;
+
+        DateTime waitUntil = this.EffectivePenalty();
+        if (DateTime.UtcNow < waitUntil)
+        {
+            if (this.queuedByUs && QueueController.InQueue)
+                this.CancelMyQueue();
+
+            return;
+        }
+
+        if (DateTime.UtcNow < this.myStartAt)
+            return;
+
+        if (this.inDuty)
+            return;
+
+        // 队伍里非队长不主动排队，跟着队长进队列
+        if (this.myRole == "party" && QueueController.PartySize > 0 && !QueueController.IsPartyLeader)
+        {
+            if (QueueController.InQueue)
+                this.queuedByUs = true;
+
+            return;
+        }
+
+        if (QueueController.AcceptPop())
+            return;
+
+        if (QueueController.InQueue)
+        {
+            this.queuedByUs = true;
+            return;
+        }
+
+        if (this.queuedByUs)
+            return; // 已经点过一次，等结果
+
+        if (this.myRole == "party")
+            QueueController.QueueDuty(this.myCfc);
+        else
+            QueueController.QueueRoulette(this.room.Assignments[this.cfg.SyncClientId].RouletteId);
+
+        this.queuedByUs = true;
+    }
+
+    private void CancelMyQueue()
+    {
+        if (!QueueController.InQueue)
+            return;
+
+        Service.Log.Info("[Sync] cancel queue");
+        QueueController.CancelQueue();
+    }
+
+    // ---------- 进本 / 退本 ----------
+
+    private void TrackDutyState()
+    {
+        uint territory = Service.ClientState.TerritoryType;
+        bool nowInDuty = territory != 0 && (DutyCatalog.IsKnownDuty(territory) || Service.DutyState.IsDutyStarted);
+
+        if (nowInDuty && !this.inDuty)
+        {
+            this.inDuty           = true;
+            this.enteredTerritory = territory;
+            this.dutyCompleted    = false;
+            this.postEntryDone    = false;
+            this.queuedByUs       = false;
+            Service.Log.Info($"[Sync] entered duty {territory}");
+            this.RunPostEntry(territory);
+        }
+        else if (!nowInDuty && this.inDuty)
+        {
+            this.inDuty = false;
+
+            if (!this.dutyCompleted && this.myRole == "roulette")
+            {
+                this.penaltyUntil = DateTime.UtcNow.AddMinutes(30);
+                this.leftEarly    = true;
+                Service.Log.Info($"[Sync] left duty early, penalty until {this.penaltyUntil:HH:mm:ss}");
+            }
+
+            this.enteredTerritory = 0;
+        }
+
+        // 导随端进错本 → 自动退
+        if (this.inDuty && this.myRole == "roulette" && this.myTarget != 0 &&
+            this.enteredTerritory != 0 && this.enteredTerritory != this.myTarget && !this.exit.Running)
+        {
+            Service.Log.Info($"[Sync] wrong duty {this.enteredTerritory} != target {this.myTarget}, leaving");
+            this.exit.Start();
+        }
+
+        if (this.exit.Running)
+        {
+            this.exit.Tick();
+            if (!this.exit.Running && !this.inDuty)
+                this.queuedByUs = false;
+        }
+    }
+
+    private void RunPostEntry(uint territory)
+    {
+        if (this.postEntryDone || this.room == null)
+            return;
+
+        this.postEntryDone = true;
+        PostEntry post = this.room.Options.PostEntry;
+
+        if (post.Mode is "command" or "both" && post.Command.Length > 0)
+        {
+            string cmd = post.Command.StartsWith('/') ? post.Command : "/" + post.Command;
+            Service.Log.Info($"[Sync] post-entry command: {cmd}");
+            Service.Commands.ProcessCommand(cmd);
+        }
+
+        if (post.Mode is "autoduty" or "both")
+        {
+            Service.Log.Info($"[Sync] post-entry AutoDuty.Run({territory})");
+            this.ipc.Run(territory, 1, this.cfg.BareMode);
+        }
+    }
+
+    internal void OnDutyCompleted() => this.dutyCompleted = true;
+
+    // ---------- 上报 ----------
+
+    private void SendReport()
+    {
+        if (this.room == null || this.cfg.SyncRoomCode.Length == 0)
+            return;
+
+        ClientReport report = new()
+        {
+            State        = this.inDuty ? "in_duty" : QueueController.InQueue ? "queued" : "idle",
+            Role         = this.myRole,
+            Territory    = this.enteredTerritory,
+            Target       = this.myTarget,
+            Round        = this.room.Round,
+            Party        = QueueController.PartyNames().ToList(),
+            PenaltyUntil = this.penaltyUntil > DateTime.UtcNow
+                               ? new DateTimeOffset(this.penaltyUntil).ToUnixTimeMilliseconds()
+                               : 0,
+            QueueStartAt = this.queuedByUs ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : 0,
+        };
+
+        _ = this.client.ReportAsync(this.cfg.SyncRoomCode, this.cfg.SyncClientId, report);
+    }
+
+    // ---------- 队长逻辑 ----------
+
+    private void HostTick()
+    {
+        if (this.room == null || !this.cfg.SyncIsHost)
+            return;
+
+        if ((DateTime.UtcNow - this.lastSignalAt).TotalSeconds < 3)
+            return;
+
+        RoomOptions opt = this.room.Options;
+
+        if (this.room.Phase == "queueing")
+        {
+            bool anyWrong = this.room.Clients.Values.Any(c =>
+                                c.Online && c.Report is { Role: "roulette", State: "in_duty" } &&
+                                c.Report.Territory != 0 && c.Report.Territory != c.Report.Target);
+
+            int okCount = this.room.Clients.Values.Count(c =>
+                              c.Online && c.Report is { Role: "roulette", State: "in_duty" } &&
+                              c.Report.Territory != 0 && c.Report.Territory == c.Report.Target);
+
+            if (!anyWrong && okCount >= Math.Max(1, opt.SuccessMin))
+            {
+                Service.Log.Info("[Sync] round success");
+                this.lastSignalAt = DateTime.UtcNow;
+                _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "next");
+                return;
+            }
+
+            bool timeout = DateTime.UtcNow >
+                           DateTimeOffset.FromUnixTimeMilliseconds(this.room.StartAt).UtcDateTime
+                                         .AddSeconds(opt.QueueTimeoutSec);
+
+            bool nothingHappening = this.room.Clients.Values.All(c =>
+                                        c.Report == null || c.Report.State is "idle" or "queued");
+
+            if (timeout && nothingHappening)
+            {
+                Service.Log.Info("[Sync] queue timeout, aborting round");
+                this.lastSignalAt = DateTime.UtcNow;
+                _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "abort");
+            }
+
+            return;
+        }
+
+        if (this.room.Phase == "idle" && opt.AutoLoop && this.room.Round <= opt.MaxRounds)
+        {
+            bool allReady = this.room.Clients.Values.Where(c => c.Online)
+                                       .All(c => c.Report is { State: "idle" });
+
+            if (allReady && DateTime.UtcNow >= this.EffectivePenalty())
+            {
+                Service.Log.Info("[Sync] auto loop: starting next round");
+                this.lastSignalAt = DateTime.UtcNow;
+                _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "next");
+                _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "start");
+            }
+        }
+    }
+
+    // ---------- 状态 ----------
+
+    private void UpdateStatus()
+    {
+        if (this.room == null)
+        {
+            this.Status = "未连接";
+            return;
+        }
+
+        DateTime penalty = this.EffectivePenalty();
+        string phase = this.room.Phase switch
+        {
+            "queueing" => "排队中",
+            "armed"    => "已下发配置",
+            "idle"     => "待机",
+            _          => this.room.Phase,
+        };
+
+        this.Status = DateTime.UtcNow < penalty
+                          ? $"{phase} · 惩罚等待 {(penalty - DateTime.UtcNow):mm\\:ss}"
+                          : $"{phase} · 第 {this.room.Round} 轮 · 我：{this.myRole}";
+    }
+
+    // ---------- 队长操作 ----------
+
+    internal void PushConfig()
+    {
+        if (this.room == null || !this.cfg.SyncIsHost)
+            return;
+
+        _ = this.client.ConfigAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken,
+                                    this.cfg.SyncAssignments, this.cfg.SyncOptions, this.cfg.SyncStagger);
+    }
+
+    internal void StartRound()
+    {
+        if (this.room == null || !this.cfg.SyncIsHost)
+            return;
+
+        long startAt = DateTimeOffset.UtcNow.AddSeconds(3).ToUnixTimeMilliseconds();
+        _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "start");
+        _ = this.client.ConfigAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken,
+                                    this.cfg.SyncAssignments, this.cfg.SyncOptions, this.cfg.SyncStagger);
+        this.lastSignalAt = DateTime.UtcNow;
+        Service.Log.Info($"[Sync] start round, startAt={startAt}");
+    }
+
+    internal void Abort()
+    {
+        if (this.room == null || !this.cfg.SyncIsHost)
+            return;
+
+        _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "abort");
+    }
+
+    internal void NextRound()
+    {
+        if (this.room == null || !this.cfg.SyncIsHost)
+            return;
+
+        _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "next");
+    }
+}
