@@ -20,7 +20,9 @@ from urllib.parse import urlparse, parse_qs
 HOST = os.environ.get('HOST', '127.0.0.1')
 PORT = int(os.environ.get('PORT', '8787'))
 CLIENT_TIMEOUT_MS = 30_000
-ROOM_IDLE_MS = 6 * 60 * 60_000
+ROOM_IDLE_MS = 6 * 60 * 60_000          # 硬上限：房间存在超过 6 小时直接回收
+ROOM_EMPTY_MS = int(os.environ.get('ROOM_EMPTY_MS', str(10 * 60_000)))  # 没有在线客户端超过这个时间就回收
+GC_INTERVAL_MS = int(os.environ.get('GC_INTERVAL_MS', '60000'))
 
 rooms = {}
 lock = threading.Lock()
@@ -61,6 +63,7 @@ def new_room(name):
         'seq': 0,
         'createdAt': now_ms(),
         'touchedAt': now_ms(),
+        'activeAt': now_ms(),
         'phase': 'idle',
         'round': 1,
         'startAt': 0,
@@ -317,12 +320,26 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 def gc_loop():
     while True:
-        time.sleep(600)
+        time.sleep(GC_INTERVAL_MS / 1000.0)
         t = now_ms()
         with lock:
-            dead = [c for c, r in rooms.items() if t - r['touchedAt'] > ROOM_IDLE_MS]
-            for c in dead:
-                rooms.pop(c, None)
+            for code in list(rooms.keys()):
+                room = rooms.get(code)
+                if not room:
+                    continue
+
+                online = any((t - c.get('lastSeen', 0)) <= CLIENT_TIMEOUT_MS
+                             for c in room['clients'].values())
+
+                if online:
+                    room['activeAt'] = t
+                    continue
+
+                idle = t - room.get('activeAt', room['createdAt'])
+                too_old = t - room['createdAt'] > ROOM_IDLE_MS
+
+                if idle > ROOM_EMPTY_MS or too_old:
+                    rooms.pop(code, None)
 
 
 if __name__ == '__main__':

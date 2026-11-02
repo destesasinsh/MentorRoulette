@@ -105,6 +105,10 @@ internal sealed class SyncWindow : Window
                               $"房间 {cfg.SyncRoomCode} · {(cfg.SyncIsHost ? "队长" : "成员")} · {(this.Sync.Connected ? "已连接" : "未连接")}");
 
             ImGui.SameLine();
+            if (ImGui.Button("复制房间号"))
+                ImGui.SetClipboardText(cfg.SyncRoomCode);
+
+            ImGui.SameLine();
             if (ImGui.Button("断开"))
             {
                 this.Sync.Disconnect();

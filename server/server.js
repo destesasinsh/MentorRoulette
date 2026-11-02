@@ -16,7 +16,8 @@ const crypto = require('node:crypto');
 
 const PORT = Number(process.env.PORT || 8787);
 const CLIENT_TIMEOUT_MS = 30_000;   // 超过这个时间没上报就当掉线
-const ROOM_IDLE_MS = 6 * 60 * 60_000; // 房间 6 小时无人访问就回收
+const ROOM_IDLE_MS = 6 * 60 * 60_000; // 硬上限：房间存在 6 小时直接回收
+const ROOM_EMPTY_MS = Number(process.env.ROOM_EMPTY_MS || 10 * 60_000); // 没有在线客户端超过这个时间就回收
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -42,6 +43,7 @@ function createRoom(name) {
     seq: 0,
     createdAt: now(),
     touchedAt: now(),
+    activeAt: now(),
     phase: 'idle',
     round: 1,
     startAt: 0,
@@ -294,9 +296,18 @@ const server = http.createServer(async (req, res) => {
 setInterval(() => {
   const t = now();
   for (const [code, room] of rooms) {
-    if (t - room.touchedAt > ROOM_IDLE_MS) rooms.delete(code);
+    const online = Object.values(room.clients)
+      .some((c) => t - (c.lastSeen || 0) <= CLIENT_TIMEOUT_MS);
+
+    if (online) {
+      room.activeAt = t;
+      continue;
+    }
+
+    const idle = t - (room.activeAt || room.createdAt);
+    if (idle > ROOM_EMPTY_MS || t - room.createdAt > ROOM_IDLE_MS) rooms.delete(code);
   }
-}, 10 * 60_000).unref();
+}, 60_000).unref();
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[MentorRoulette] relay listening on http://0.0.0.0:${PORT}`);
