@@ -121,15 +121,7 @@ internal sealed unsafe class RouletteQueue
         }
     }
 
-    private bool AcceptPop()
-    {
-        if (!AddonHelper.TryGetReady("ContentsFinderConfirm", out AtkUnitBase* confirm))
-            return false;
-
-        Service.Log.Debug("[Queue] confirming duty pop");
-        AddonHelper.Fire(confirm, 8);
-        return true;
-    }
+    private bool AcceptPop() => DutyConfirm.TryAccept();
 
     private void SelectByName(AtkUnitBase* addon, uint rouletteRowId)
     {

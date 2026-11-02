@@ -187,15 +187,8 @@ internal static unsafe class QueueController
         finder->QueueInfo.CancelQueue();
     }
 
-    /// <summary>确认匹配弹出框。</summary>
-    internal static bool AcceptPop()
-    {
-        if (!AddonHelper.TryGetReady("ContentsFinderConfirm", out AtkUnitBase* confirm))
-            return false;
-
-        AddonHelper.Fire(confirm, 8);
-        return true;
-    }
+    /// <summary>确认匹配弹出框（带节流与重试）。</summary>
+    internal static bool AcceptPop() => DutyConfirm.TryAccept();
 
     internal static int PartySize => Service.PartyList.Length;
 
