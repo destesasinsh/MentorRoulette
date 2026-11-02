@@ -42,14 +42,13 @@ internal static class DutyCatalog
 
         foreach (ContentFinderCondition cfc in sheet)
         {
-            if (cfc.ContentType.ValueNullable == null ||
-                cfc.TerritoryType.ValueNullable?.ExVersion.ValueNullable == null ||
-                cfc.ContentType.Value.RowId is not (2 or 4 or 5 or 20 or 30 or 40) ||
-                cfc.Name.ToString().IsNullOrEmpty())
+            // 不按 ContentType 白名单裁剪：行会令、特殊副本等也要能选
+            if (cfc.TerritoryType.ValueNullable is not { } territoryRow)
                 continue;
 
-            uint territory = cfc.TerritoryType.Value.RowId;
-            if (territory == 0 || byTerritory.ContainsKey(territory))
+            uint territory = territoryRow.RowId;
+
+            if (territory == 0 || cfc.Name.ToString().IsNullOrEmpty() || byTerritory.ContainsKey(territory))
                 continue;
 
             DutyEntry entry = new()

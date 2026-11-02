@@ -16,6 +16,7 @@ internal sealed class SyncWindow : Window
     private string joinCode  = string.Empty;
     private string dutySearch = string.Empty;
     private string? dutyPickerFor;
+    private bool    onlyAdSupported;
 
     internal SyncWindow(Plugin plugin) : base("组队同步###MentorRouletteSync")
     {
@@ -216,14 +217,19 @@ internal sealed class SyncWindow : Window
         ImGui.SetNextItemWidth(200);
         ImGui.InputTextWithHint("##dutySearch", "搜索…", ref this.dutySearch, 64);
 
-        using (ImRaii.Child("##dutyPickerList", new Vector2(320, 260), true))
+        ImGui.SameLine();
+        ImGui.Checkbox("只看 AutoDuty 支持", ref this.onlyAdSupported);
+
+        using (ImRaii.Child("##dutyPickerList", new Vector2(340, 280), true))
         {
-            foreach (DutyEntry duty in DutyCatalog.Entries.Where(e => e.HasPath))
+            foreach (DutyEntry duty in this.onlyAdSupported ? DutyCatalog.SupportedEntries : DutyCatalog.Entries)
             {
                 if (this.dutySearch.Length > 0 && !duty.Name.Contains(this.dutySearch, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                if (!ImGui.Selectable($"{duty.Name}##{duty.TerritoryId}"))
+                string label = duty.HasPath ? $"{duty.Name}##{duty.TerritoryId}" : $"{duty.Name}（无 AD 路径）##{duty.TerritoryId}";
+
+                if (!ImGui.Selectable(label))
                     continue;
 
                 a.Territory = duty.TerritoryId;
