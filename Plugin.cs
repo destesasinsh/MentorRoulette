@@ -37,6 +37,7 @@ public sealed class Plugin : IDalamudPlugin
         this.Window  = new MainWindow(this);
 
         this.Config.Migrate();
+        _ = NativeCommand.Available; // 触发静态初始化并打印可用性
 
         this.windowSystem.AddWindow(this.Window);
 

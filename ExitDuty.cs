@@ -86,6 +86,13 @@ internal sealed unsafe class ExitDuty
 
     private void TryLeave()
     {
+        if (NativeCommand.Available && NativeCommand.Execute(NativeCommand.LeaveDuty))
+        {
+            Service.Log.Debug($"[ExitDuty] native leave #{this.attempts}");
+            DiagLog.Add($"退本请求 #{this.attempts}（原生）");
+            return;
+        }
+
         AgentModule.Instance()->GetAgentByInternalId(AgentId.ContentsFinderMenu)->Show();
 
         if (!AddonHelper.TryGetReady("ContentsFinderMenu", out AtkUnitBase* menu))

@@ -43,6 +43,12 @@ internal static class DutyConfirm
         lastFire = DateTime.UtcNow;
         fireCount++;
 
+        if (NativeCommand.Available && NativeCommand.Execute(NativeCommand.NotifyTerritoryReady))
+        {
+            DiagLog.Add($"确认进本 #{fireCount}（原生）");
+            return true;
+        }
+
         AddonHelper.Fire(addon, 8);
         DiagLog.Add($"确认进本 #{fireCount}");
         Service.Log.Info($"[Confirm] commence #{fireCount}");
