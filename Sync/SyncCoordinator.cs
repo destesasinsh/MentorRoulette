@@ -20,6 +20,7 @@ internal sealed class SyncCoordinator
     private RoomState? room;
 
     private long appliedSeq;
+    private bool commandsInitialized;
     private int  appliedRound;
     private bool hasAssignment;
 
@@ -197,10 +198,17 @@ internal sealed class SyncCoordinator
             this.myRole = "none";
         }
 
-        // 命令
+        // 命令（插件刚加载时跳过 2 分钟前的旧命令，避免重放旧的 start）
+        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
         foreach (Command cmd in st.Commands.Where(c => c.Seq > this.appliedSeq).OrderBy(c => c.Seq))
         {
             this.appliedSeq = cmd.Seq;
+
+            if (!this.commandsInitialized && cmd.At < nowMs - 120_000)
+                continue;
+
+            this.commandsInitialized = true;
             this.ApplyCommand(cmd);
         }
 

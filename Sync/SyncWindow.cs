@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Threading.Tasks;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
@@ -83,15 +84,23 @@ internal sealed class SyncWindow : Window
             ImGui.SameLine();
             if (ImGui.Button("加入房间"))
             {
-                (bool ok, string msg) = this.Sync.JoinRoomAsync(this.joinCode.ToUpperInvariant()).GetAwaiter().GetResult();
-                Service.Log.Info($"[Sync] join: {ok} {msg}");
+                string code = this.joinCode.ToUpperInvariant();
+                _ = Task.Run(async () =>
+                              {
+                                  (bool ok, string msg) = await this.Sync.JoinRoomAsync(code);
+                                  Service.Log.Info($"[Sync] join: {ok} {msg}");
+                              });
             }
 
             ImGui.SameLine();
             if (ImGui.Button("创建房间（我是队长）"))
             {
-                (bool ok, string msg) = this.Sync.CreateRoomAsync(cfg.SyncClientName).GetAwaiter().GetResult();
-                Service.Log.Info($"[Sync] create: {ok} {msg}");
+                string hostName = cfg.SyncClientName;
+                _ = Task.Run(async () =>
+                              {
+                                  (bool ok, string msg) = await this.Sync.CreateRoomAsync(hostName);
+                                  Service.Log.Info($"[Sync] create: {ok} {msg}");
+                              });
             }
         }
         else
