@@ -63,6 +63,9 @@ public sealed class Config : IPluginConfiguration
     public bool   SyncIsHost     { get; set; }
 
     public Dictionary<string, Assignment> SyncAssignments { get; set; } = [];
+
+    /// <summary>「已选副本」列表（TerritoryType），供穿梭框使用。</summary>
+    public List<uint> SyncSelectedDuties { get; set; } = [];
     public RoomOptions                    SyncOptions     { get; set; } = new();
     public Stagger                        SyncStagger     { get; set; } = new();
 

@@ -15,8 +15,8 @@ internal sealed class SyncWindow : Window
     private readonly Plugin plugin;
     private string joinCode  = string.Empty;
     private string dutySearch = string.Empty;
-    private string? dutyPickerFor;
-    private bool    onlyAdSupported;
+    private uint selectedDuty;
+    private bool onlyAdSupported;
 
     internal SyncWindow(Plugin plugin) : base("组队同步###MentorRouletteSync")
     {
@@ -131,17 +131,12 @@ internal sealed class SyncWindow : Window
         ImGui.SameLine();
         if (ImGui.Button("快捷：讨伐彷徨死灵！"))
         {
-            DutyEntry? preset = DutyCatalog.Get(190);
-            if (preset != null)
+            if (DutyCatalog.Get(190) != null)
             {
-                foreach (Assignment a in cfg.SyncAssignments.Values.Where(x => x.Role == "party"))
-                {
-                    a.Territory = preset.TerritoryId;
-                    a.Cfc       = preset.CfcId;
-                }
-
-                cfg.Save();
-                Service.Log.Info($"[Sync] preset applied: {preset.Name} ({preset.TerritoryId})");
+                this.AddDutyToSelection(cfg, 190);
+                this.selectedDuty = 190;
+                this.ApplySelectedDuty(cfg, 190);
+                Service.Log.Info("[Sync] preset: 讨伐彷徨死灵！(190)");
             }
             else
             {
@@ -214,14 +209,6 @@ internal sealed class SyncWindow : Window
                                   $"副本：{dutyName} ({a.Territory})");
 
                 ImGui.SameLine();
-                if (ImGui.Button($"改##pick{c.Id}"))
-                {
-                    this.dutyPickerFor = c.Id;
-                    this.dutySearch    = string.Empty;
-                    ImGui.OpenPopup("dutyPicker");
-                }
-
-                ImGui.SameLine();
                 string partyId = a.PartyId;
                 ImGui.SetNextItemWidth(60);
                 if (ImGui.InputText($"##party{c.Id}", ref partyId, 8))
@@ -230,14 +217,16 @@ internal sealed class SyncWindow : Window
                     cfg.Save();
                 }
 
-                if (this.dutyPickerFor == c.Id)
-                    this.DrawDutyPicker(cfg, a);
             }
 
             string state = c.Report == null ? "—" : $"{c.Report.State} {(c.Report.Territory != 0 ? $"·{c.Report.Territory}" : string.Empty)}";
             ImGui.SameLine();
             ImGui.TextDisabled(state);
         }
+
+        ImGui.Separator();
+        this.DrawDutySelector(cfg);
+        ImGui.Separator();
 
         if (ImGui.Button("下发配置"))
             this.Sync.PushConfig();
@@ -255,38 +244,122 @@ internal sealed class SyncWindow : Window
             this.Sync.NextRound();
     }
 
-    private void DrawDutyPicker(Config cfg, Assignment a)
+    private void DrawDutySelector(Config cfg)
     {
-        if (!ImGui.BeginPopup("dutyPicker"))
+        if (!ImGui.CollapsingHeader($"副本选择（已选 {cfg.SyncSelectedDuties.Count}）"))
             return;
 
-        ImGui.SetNextItemWidth(200);
-        ImGui.InputTextWithHint("##dutySearch", "搜索…", ref this.dutySearch, 64);
+        float height = 220f;
+        float width  = MathF.Max(160f, (ImGui.GetContentRegionAvail().X - 12f) * 0.5f);
 
-        ImGui.SameLine();
-        ImGui.Checkbox("只看 AutoDuty 支持", ref this.onlyAdSupported);
-
-        using (ImRaii.Child("##dutyPickerList", new Vector2(340, 280), true))
+        using (ImRaii.Child("##dutyLeft", new Vector2(width, height), true))
         {
+            ImGui.SetNextItemWidth(-1f);
+            ImGui.InputTextWithHint("##dutySearch", "搜索待选副本…", ref this.dutySearch, 64);
+            ImGui.Checkbox("只看 AutoDuty 支持", ref this.onlyAdSupported);
+
             foreach (DutyEntry duty in this.onlyAdSupported ? DutyCatalog.SupportedEntries : DutyCatalog.Entries)
             {
                 if (this.dutySearch.Length > 0 && !duty.Name.Contains(this.dutySearch, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                string label = duty.HasPath ? $"{duty.Name}##{duty.TerritoryId}" : $"{duty.Name}（无 AD 路径）##{duty.TerritoryId}";
+                bool already = cfg.SyncSelectedDuties.Contains(duty.TerritoryId);
 
-                if (!ImGui.Selectable(label, a.Territory == duty.TerritoryId))
-                    continue;
+                if (ImGui.Selectable($"{duty.Name} ({duty.TerritoryId})##left{duty.TerritoryId}", false))
+                {
+                    this.AddDutyToSelection(cfg, duty.TerritoryId);
+                    this.selectedDuty = duty.TerritoryId;
+                }
 
-                a.Territory = duty.TerritoryId;
-                a.Cfc       = duty.CfcId;
-                cfg.Save();
-                this.dutyPickerFor = null;
-                ImGui.CloseCurrentPopup();
+                if (already)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextDisabled("· 已选");
+                }
             }
         }
 
-        ImGui.EndPopup();
+        ImGui.SameLine();
+
+        using (ImRaii.Child("##dutyRight", new Vector2(0f, height), true))
+        {
+            if (cfg.SyncSelectedDuties.Count == 0)
+                ImGui.TextDisabled("点左边的副本加到这里");
+
+            foreach (uint territory in cfg.SyncSelectedDuties.ToList())
+            {
+                string name = DutyCatalog.Get(territory)?.Name ?? $"#{territory}";
+
+                ImGui.PushID((int)territory);
+
+                bool inUse = cfg.SyncAssignments.Values.Any(x => x.Role == "party" && x.Territory == territory);
+
+                if (ImGui.Selectable($"{name} ({territory})", this.selectedDuty == territory))
+                    this.selectedDuty = territory;
+
+                if (inUse)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.5f, 0.9f, 0.5f, 1f), "· 使用中");
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("移除"))
+                {
+                    cfg.SyncSelectedDuties.Remove(territory);
+
+                    if (this.selectedDuty == territory)
+                        this.selectedDuty = 0;
+
+                    cfg.Save();
+                }
+
+                ImGui.PopID();
+            }
+        }
+
+        if (ImGui.Button("把选中的副本设为组队端副本"))
+        {
+            uint target = this.selectedDuty != 0 ? this.selectedDuty : cfg.SyncSelectedDuties.FirstOrDefault();
+
+            if (target != 0)
+                this.ApplySelectedDuty(cfg, target);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("清空已选"))
+        {
+            cfg.SyncSelectedDuties.Clear();
+            this.selectedDuty = 0;
+            cfg.Save();
+        }
+    }
+
+    private void AddDutyToSelection(Config cfg, uint territory)
+    {
+        if (!cfg.SyncSelectedDuties.Contains(territory))
+            cfg.SyncSelectedDuties.Add(territory);
+
+        cfg.Save();
+    }
+
+    private void ApplySelectedDuty(Config cfg, uint territory)
+    {
+        DutyEntry? duty = DutyCatalog.Get(territory);
+        if (duty == null)
+        {
+            Service.Log.Warning($"[Sync] 副本 {territory} 不在列表里");
+            return;
+        }
+
+        foreach (Assignment a in cfg.SyncAssignments.Values.Where(x => x.Role == "party"))
+        {
+            a.Territory = duty.TerritoryId;
+            a.Cfc       = duty.CfcId;
+        }
+
+        cfg.Save();
+        Service.Log.Info($"[Sync] 组队端副本 -> {duty.Name} ({duty.TerritoryId})");
     }
 
     private void DrawOptions(Config cfg)
