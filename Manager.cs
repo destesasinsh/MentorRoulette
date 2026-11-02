@@ -129,13 +129,19 @@ internal sealed class Manager
             Service.Chat.Print(new XivChatEntry { Message = $"[导随] {message}" });
     }
 
-    internal bool IsAllowed(uint territory)
-    {
-        if (!this.ipc.HasPath(territory))
-            return false;
+    /// <summary>这个副本要不要留下来（跑或挂机），返回 false 就退本。</summary>
+    internal bool IsAllowed(uint territory) =>
+        this.cfg.Mode switch
+        {
+            RunMode.AllSupported => this.ipc.HasPath(territory),
+            _                    => this.cfg.Whitelist.Contains(territory),
+        };
 
-        return this.cfg.Mode == RunMode.AllSupported || this.cfg.Whitelist.Contains(territory);
-    }
+    /// <summary>这个副本要不要交给 AutoDuty 自动跑。</summary>
+    private bool ShouldStartAutoDuty(uint territory) =>
+        this.cfg.Mode == RunMode.AllSupported
+            ? this.ipc.HasPath(territory)
+            : this.cfg.StartAdInCustomMode && this.ipc.HasPath(territory);
 
     internal void Tick()
     {
@@ -232,9 +238,20 @@ internal sealed class Manager
 
         if (this.IsAllowed(territory))
         {
-            this.Notify($"支持 {name}，交给 AutoDuty。");
-            this.ipc.Run(territory, 1, this.cfg.BareMode);
-            this.SetState(State.Running, $"攻略中：{name}");
+            if (this.ShouldStartAutoDuty(territory))
+            {
+                this.Notify($"支持 {name}，交给 AutoDuty。");
+                this.ipc.Run(territory, 1, this.cfg.BareMode);
+                this.SetState(State.Running, $"攻略中：{name}");
+                return;
+            }
+
+            // 自定义模式（或没开自动启动）：留下副本，但不接管战斗
+            this.Notify(this.cfg.Mode == RunMode.Selected
+                            ? $"自定义副本 {name} 已保留，不启动 AutoDuty。"
+                            : $"{name} 没有 AutoDuty 路径，保留但不会自动攻略。");
+
+            this.SetState(State.Keeping, $"保留：{name}（未启动 AutoDuty）");
             return;
         }
 

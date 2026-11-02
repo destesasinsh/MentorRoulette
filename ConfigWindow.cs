@@ -82,24 +82,37 @@ internal sealed class ConfigWindow : Window, IDisposable
         ImGui.Separator();
 
         // 模式
-        ImGui.Text("模式");
+        ImGui.Text("策略");
+
         bool all = cfg.Mode == RunMode.AllSupported;
-        if (ImGui.RadioButton("AutoDuty 支持的副本都跑", all))
+        if (ImGui.RadioButton("AutoDuty 支持的副本", all))
         {
             cfg.Mode = RunMode.AllSupported;
             cfg.Save();
         }
 
-        ImGui.TextDisabled("AutoDuty 有路径就自动攻略，没有的退出（或挂机）。");
+        ImGui.TextDisabled("AutoDuty 有路径的副本自动攻略，没有的退出（或挂机）。");
 
-        bool selected = cfg.Mode == RunMode.Selected;
-        if (ImGui.RadioButton("只跑我勾选的副本", selected))
+        bool custom = cfg.Mode == RunMode.Selected;
+        if (ImGui.RadioButton("完全自定义副本", custom))
         {
             cfg.Mode = RunMode.Selected;
             cfg.Save();
         }
 
-        ImGui.TextDisabled("只有下面列表勾选的副本会跑，其余一律退出。");
+        ImGui.TextDisabled("只保留下面勾选的副本，其余一律退出；默认不接管战斗。");
+
+        using (ImRaii.Disabled(!custom))
+        {
+            bool startAd = cfg.StartAdInCustomMode;
+            if (ImGui.Checkbox("自定义模式下也自动启动 AutoDuty", ref startAd))
+            {
+                cfg.StartAdInCustomMode = startAd;
+                cfg.Save();
+            }
+        }
+
+        ImGui.TextDisabled("不勾选时：保留下来的副本只是「不走」，战斗交给你自己。");
 
         // 不支持时
         ImGui.Text("排到不支持的副本时");
@@ -130,7 +143,13 @@ internal sealed class ConfigWindow : Window, IDisposable
 
     private void DrawWhitelist(Config cfg)
     {
-        if (!ImGui.CollapsingHeader($"副本列表（已选 {cfg.Whitelist.Count} / 支持 {DutyCatalog.SupportedCount}）"))
+        bool custom = cfg.Mode == RunMode.Selected;
+
+        string header = custom
+                            ? $"自定义副本列表（已选 {cfg.Whitelist.Count}）"
+                            : $"AutoDuty 支持的副本（{DutyCatalog.SupportedCount}）";
+
+        if (!ImGui.CollapsingHeader(header))
             return;
 
         if (ImGui.Button("刷新支持状态"))
@@ -139,57 +158,69 @@ internal sealed class ConfigWindow : Window, IDisposable
             DutyCatalog.RefreshSupport(this.plugin.Ipc);
         }
 
-        ImGui.SameLine();
-
-        if (ImGui.Button("全部支持")) 
+        if (custom)
         {
-            cfg.Whitelist = DutyCatalog.SupportedEntries.Select(e => e.TerritoryId).ToList();
-            cfg.Save();
-        }
+            ImGui.SameLine();
 
-        ImGui.SameLine();
+            if (ImGui.Button("全选支持 AD 的"))
+            {
+                cfg.Whitelist = DutyCatalog.SupportedEntries.Select(e => e.TerritoryId).ToList();
+                cfg.Save();
+            }
 
-        if (ImGui.Button("清空"))
-        {
-            cfg.Whitelist.Clear();
-            cfg.Save();
+            ImGui.SameLine();
+
+            if (ImGui.Button("清空"))
+            {
+                cfg.Whitelist.Clear();
+                cfg.Save();
+            }
         }
 
         ImGui.SetNextItemWidth(220);
         ImGui.InputTextWithHint("##search", "搜索副本…", ref this.search, 128);
 
-        using ImRaii.DisabledDisposable whitelistDisabled = ImRaii.Disabled(cfg.Mode != RunMode.Selected);
-
-        using (ImRaii.Child("##dutyList", new Vector2(0, 180), true))
+        using (ImRaii.Child("##dutyList", new Vector2(0, 200), true))
         {
-            List<DutyEntry> list = DutyCatalog.Entries.Where(e => e.HasPath).ToList();
+            IEnumerable<DutyEntry> list = custom ? DutyCatalog.Entries : DutyCatalog.SupportedEntries;
 
             foreach (DutyEntry duty in list)
             {
                 if (this.search.Length > 0 && !duty.Name.Contains(this.search, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                bool picked = cfg.Whitelist.Contains(duty.TerritoryId);
-
-                if (ImGui.Checkbox($"##duty{duty.TerritoryId}", ref picked))
+                if (custom)
                 {
-                    if (picked)
+                    bool picked = cfg.Whitelist.Contains(duty.TerritoryId);
+
+                    if (ImGui.Checkbox($"##duty{duty.TerritoryId}", ref picked))
                     {
-                        if (!cfg.Whitelist.Contains(duty.TerritoryId))
-                            cfg.Whitelist.Add(duty.TerritoryId);
-                    }
-                    else
-                    {
-                        cfg.Whitelist.Remove(duty.TerritoryId);
+                        if (picked)
+                        {
+                            if (!cfg.Whitelist.Contains(duty.TerritoryId))
+                                cfg.Whitelist.Add(duty.TerritoryId);
+                        }
+                        else
+                        {
+                            cfg.Whitelist.Remove(duty.TerritoryId);
+                        }
+
+                        cfg.Save();
                     }
 
-                    cfg.Save();
+                    ImGui.SameLine();
                 }
 
-                ImGui.SameLine();
                 ImGui.TextUnformatted(duty.Name);
                 ImGui.SameLine();
                 ImGui.TextDisabled($"Lv.{duty.Level} ({duty.TerritoryId})");
+
+                if (custom)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(duty.HasPath ? new Vector4(0.4f, 0.9f, 0.4f, 1f) : new Vector4(0.7f, 0.7f, 0.7f, 1f),
+                                      duty.HasPath ? "AD 支持" : "AD 无路径");
+                }
             }
         }
     }

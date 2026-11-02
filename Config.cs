@@ -23,11 +23,16 @@ public sealed class Config : IPluginConfiguration
 
     public bool Enabled { get; set; }
 
-    /// <summary>AllSupported = AutoDuty 有路径就跑；Selected = 只有勾选的副本才跑。</summary>
+    /// <summary>AllSupported = 按 AutoDuty 是否支持来跑；Selected = 完全自定义，只留勾选的副本。</summary>
     public RunMode Mode { get; set; } = RunMode.AllSupported;
 
-    /// <summary>Selected 模式使用的白名单（TerritoryType）。</summary>
+    /// <summary>自定义模式下的白名单（TerritoryType）。</summary>
     public List<uint> Whitelist { get; set; } = [];
+
+    /// <summary>
+    /// 自定义模式下是否也自动启动 AutoDuty。默认关：自定义模式只负责「留下这些副本」，不接管战斗。
+    /// </summary>
+    public bool StartAdInCustomMode { get; set; } = false;
 
     /// <summary>排到不支持的副本时：退本，或者原地挂着。</summary>
     public UnsupportedAction Unsupported { get; set; } = UnsupportedAction.LeaveDuty;

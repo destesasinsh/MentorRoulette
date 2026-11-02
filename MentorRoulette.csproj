@@ -1,6 +1,6 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.0.0.1</Version>
+    <Version>0.0.0.2</Version>
     <Authors>destesasinsh</Authors>
     <Company></Company>
     <Description>MentorRoulette - 导随助手：自动排导师随机，进入支持的本自动调用 AutoDuty，不支持的本退出重排</Description>
