@@ -71,6 +71,9 @@ public sealed class Config : IPluginConfiguration
     /// <summary>组队端要排的那个副本（TerritoryType，必须是清单里的）。</summary>
     public uint PartyDutyTerritory { get; set; }
 
+    /// <summary>立即退本：不等脱战（DailyRoutines 的 ForceToLeave）。</summary>
+    public bool ForceLeaveDuty { get; set; }
+
     public int JudgeDelayMs      { get; set; } = 3000;
     public int GraceSeconds      { get; set; } = 3;
     public int CombatTimeoutSec  { get; set; } = 20;

@@ -99,6 +99,12 @@ internal sealed class Manager
 
     internal void Stop(string reason)
     {
+        if (QueueController.InQueue)
+        {
+            QueueController.CancelQueue();
+            DiagLog.Add("停止：已取消排队");
+        }
+
         this.queue.Reset();
         this.exit.Stop();
         this.cfg.Enabled = false;
@@ -355,7 +361,7 @@ internal sealed class Manager
         this.exit.Tick();
 
         if (!this.exit.Running && InDuty)
-            this.exit.Start();
+            this.exit.Start(this.cfg.ForceLeaveDuty);
     }
 
     private void FinishLeave()
@@ -417,7 +423,7 @@ internal sealed class Manager
 
             // 打完了还站在里面（AutoDuty 的 AutoExitDuty 关着），替用户退本
             if ((DateTime.UtcNow - this.completedAt.Value).TotalSeconds > 15 && !this.exit.Running)
-                this.exit.Start();
+                this.exit.Start(this.cfg.ForceLeaveDuty);
 
             this.exit.Tick();
             return;
@@ -432,7 +438,7 @@ internal sealed class Manager
             if ((DateTime.UtcNow - this.completedAt.Value).TotalSeconds > 120 && !this.exit.Running)
             {
                 this.Notify("AutoDuty 已经停下但还在本里，退出这个副本重排。");
-                this.exit.Start();
+                this.exit.Start(this.cfg.ForceLeaveDuty);
             }
 
             this.exit.Tick();

@@ -293,7 +293,7 @@ internal sealed class SyncCoordinator
                 if (cmd.Target == null || cmd.Target == this.cfg.SyncClientId)
                 {
                     if (this.inDuty && !this.exit.Running)
-                        this.exit.Start();
+                        this.exit.Start(this.cfg.ForceLeaveDuty);
                 }
 
                 break;
@@ -446,7 +446,7 @@ internal sealed class SyncCoordinator
         {
             DiagLog.Add($"进错副本 {this.enteredTerritory}（目标 {this.myTarget}），退本");
             Service.Log.Info($"[Sync] wrong duty {this.enteredTerritory} != target {this.myTarget}, leaving");
-            this.exit.Start();
+            this.exit.Start(this.cfg.ForceLeaveDuty);
         }
 
         if (this.exit.Running)
@@ -726,6 +726,9 @@ internal sealed class SyncCoordinator
         if (this.room == null || !this.cfg.SyncIsHost)
             return;
 
+        this.CancelMyQueue();
+        this.queuedByUs = false;
+        DiagLog.Add("中止本轮");
         _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "abort");
     }
 

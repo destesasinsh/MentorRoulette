@@ -462,6 +462,13 @@ internal sealed class MainWindow : Window
             cfg.Save();
         }
 
+        bool force = cfg.ForceLeaveDuty;
+        if (ImGui.Checkbox("立即退本（不等脱战）", ref force))
+        {
+            cfg.ForceLeaveDuty = force;
+            cfg.Save();
+        }
+
         using (ImRaii.Disabled(!group))
         {
             bool all = cfg.PenaltyMode != "leaver";
