@@ -77,6 +77,17 @@ jobs:
           Copy-Item $pkg "latest.zip" -Force
           Get-Item latest.zip | Select-Object Name, Length
 
+      - name: Warn missing PAT
+        if: env.HAS_PAT != 'true'
+        shell: bash
+        run: echo "::warning::仓库没有配置 DALAMUDPLUGINS_PAT，已跳过发布（构建产物在 Artifacts 里）"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${PLUGIN}-${NEW_VERSION}
+          path: latest.zip
+
       - name: Publish to DalamudPlugins
         if: env.HAS_PAT == 'true'
         shell: bash

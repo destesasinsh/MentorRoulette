@@ -41,6 +41,20 @@ dotnet build MentorRoulette.csproj -c Release -p:DalamudLibPath="<Dalamud dev li
 
 产物：`bin/Release/MentorRoulette/latest.zip`（Dalamud SDK 已经打好包）
 
+## 发布
+
+推 `v*` tag 触发 CI：
+
+```bash
+git tag -a v0.0.0.2 -m "v0.0.0.2"
+git push origin v0.0.0.2
+```
+
+CI 会构建、在 `destesasinsh/DalamudPlugins` 建 `MentorRoulette-v<ver>` 的 release、更新清单和 pluginmaster。
+
+> ⚠️ 需要在**本仓库** Actions secrets 里配置 `DALAMUDPLUGINS_PAT`（有 DalamudPlugins 写权限的 PAT），否则发布会跳过、只留构建产物。
+> `gh secret set DALAMUDPLUGINS_PAT --repo destesasinsh/MentorRoulette`
+
 ## 安装
 
 把 `latest.zip` 解压到 `%APPDATA%\XIVLauncherCN\devPlugins\MentorRoulette\`，或在插件仓库里添加：
