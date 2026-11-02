@@ -38,8 +38,6 @@ public sealed class Plugin : IDalamudPlugin
         this.Sync       = new SyncCoordinator(this.Config, this.Ipc);
         this.SyncWindow = new SyncWindow(this);
 
-        this.Config.EnsureClientId();
-
         this.windowSystem.AddWindow(this.Window);
         this.windowSystem.AddWindow(this.SyncWindow);
 

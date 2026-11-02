@@ -57,8 +57,8 @@ public sealed class Config : IPluginConfiguration
     public bool   SyncEnabled    { get; set; }
     public string SyncServerUrl  { get; set; } = SyncDefaults.ServerUrl;
     public string SyncRoomCode   { get; set; } = string.Empty;
+    /// <summary>当前客户端身份（= 游戏角色名），由插件自动维护，不用手填。</summary>
     public string SyncClientId   { get; set; } = string.Empty;
-    public string SyncClientName { get; set; } = string.Empty;
     public string SyncHostToken  { get; set; } = string.Empty;
     public bool   SyncIsHost     { get; set; }
 
@@ -66,14 +66,11 @@ public sealed class Config : IPluginConfiguration
     public RoomOptions                    SyncOptions     { get; set; } = new();
     public Stagger                        SyncStagger     { get; set; } = new();
 
-    /// <summary>首次使用时生成一个短客户端 ID。</summary>
-    public string EnsureClientId()
+    /// <summary>把客户端身份同步成当前角色名。</summary>
+    public string EnsureClientId(string characterName)
     {
-        if (string.IsNullOrWhiteSpace(this.SyncClientId))
-            this.SyncClientId = "c-" + Guid.NewGuid().ToString("N")[..6];
-
-        if (string.IsNullOrWhiteSpace(this.SyncClientName))
-            this.SyncClientName = this.SyncClientId;
+        if (!string.IsNullOrWhiteSpace(characterName))
+            this.SyncClientId = characterName;
 
         return this.SyncClientId;
     }

@@ -64,16 +64,11 @@ internal sealed class SyncWindow : Window
                 ImGui.SetClipboardText(url);
         }
 
-        ImGui.SetNextItemWidth(160);
-        string name = cfg.SyncClientName;
-        if (ImGui.InputText("我的名字", ref name, 64))
-        {
-            cfg.SyncClientName = name;
-            cfg.Save();
-        }
-
-        ImGui.SameLine();
-        ImGui.TextDisabled($"ID: {cfg.EnsureClientId()}");
+        string identity = this.Sync.Identity;
+        if (identity.Length == 0)
+            ImGui.TextColored(new Vector4(1f, 0.5f, 0.5f, 1f), "尚未登录角色");
+        else
+            ImGui.TextDisabled($"角色：{identity}");
 
         bool enabled = cfg.SyncEnabled;
         if (ImGui.Checkbox("启用组队同步", ref enabled))
@@ -91,25 +86,30 @@ internal sealed class SyncWindow : Window
             ImGui.InputText("组队码", ref this.joinCode, 16);
 
             ImGui.SameLine();
-            if (ImGui.Button("加入房间"))
+            using (ImRaii.Disabled(this.Sync.Identity.Length == 0))
             {
-                string code = this.joinCode.ToUpperInvariant();
-                _ = Task.Run(async () =>
-                              {
-                                  (bool ok, string msg) = await this.Sync.JoinRoomAsync(code);
-                                  Service.Log.Info($"[Sync] join: {ok} {msg}");
-                              });
+                if (ImGui.Button("加入房间"))
+                {
+                    string code = this.joinCode.ToUpperInvariant();
+                    _ = Task.Run(async () =>
+                                  {
+                                      (bool ok, string msg) = await this.Sync.JoinRoomAsync(code);
+                                      Service.Log.Info($"[Sync] join: {ok} {msg}");
+                                  });
+                }
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("创建房间（我是队长）"))
+            using (ImRaii.Disabled(this.Sync.Identity.Length == 0))
             {
-                string hostName = cfg.SyncClientName;
-                _ = Task.Run(async () =>
-                              {
-                                  (bool ok, string msg) = await this.Sync.CreateRoomAsync(hostName);
-                                  Service.Log.Info($"[Sync] create: {ok} {msg}");
-                              });
+                if (ImGui.Button("创建房间（我是队长）"))
+                {
+                    _ = Task.Run(async () =>
+                                  {
+                                      (bool ok, string msg) = await this.Sync.CreateRoomAsync();
+                                      Service.Log.Info($"[Sync] create: {ok} {msg}");
+                                  });
+                }
             }
         }
         else

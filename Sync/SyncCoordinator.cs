@@ -57,6 +57,9 @@ internal sealed class SyncCoordinator
 
     internal bool IsHost => this.cfg.SyncEnabled && this.cfg.SyncIsHost;
 
+    /// <summary>当前游戏角色名，作为同步身份。</summary>
+    internal string Identity => Service.Objects.LocalPlayer?.Name.TextValue ?? string.Empty;
+
     /// <summary>配置文件里的地址优先，没有就用内置默认值。</summary>
     private string ServerUrl =>
         string.IsNullOrWhiteSpace(this.cfg.SyncServerUrl) ? SyncDefaults.ServerUrl : this.cfg.SyncServerUrl;
@@ -65,10 +68,15 @@ internal sealed class SyncCoordinator
 
     // ---------- 连接 ----------
 
-    internal async Task<(bool ok, string msg)> CreateRoomAsync(string name)
+    internal async Task<(bool ok, string msg)> CreateRoomAsync()
     {
+        this.SyncIdentity();
+
+        if (string.IsNullOrWhiteSpace(this.cfg.SyncClientId))
+            return (false, "还没登录角色");
+
         this.client.SetServer(this.ServerUrl);
-        CreateRoomResponse? res = await this.client.CreateRoomAsync(name).ConfigureAwait(false);
+        CreateRoomResponse? res = await this.client.CreateRoomAsync(this.cfg.SyncClientId).ConfigureAwait(false);
         if (res == null || string.IsNullOrEmpty(res.Code))
             return (false, this.client.LastError.Length > 0 ? this.client.LastError : "创建失败");
 
@@ -77,15 +85,20 @@ internal sealed class SyncCoordinator
         this.cfg.SyncIsHost    = true;
         this.cfg.Save();
 
-        await this.client.JoinAsync(res.Code, this.cfg.SyncClientId, name).ConfigureAwait(false);
+        await this.client.JoinAsync(res.Code, this.cfg.SyncClientId, this.cfg.SyncClientId).ConfigureAwait(false);
         this.StartLoop();
         return (true, $"房间 {res.Code}");
     }
 
     internal async Task<(bool ok, string msg)> JoinRoomAsync(string code)
     {
+        this.SyncIdentity();
+
+        if (string.IsNullOrWhiteSpace(this.cfg.SyncClientId))
+            return (false, "还没登录角色");
+
         this.client.SetServer(this.ServerUrl);
-        RoomState? st = await this.client.JoinAsync(code, this.cfg.SyncClientId, this.cfg.SyncClientName)
+        RoomState? st = await this.client.JoinAsync(code, this.cfg.SyncClientId, this.cfg.SyncClientId)
                                  .ConfigureAwait(false);
         if (st == null)
             return (false, this.client.LastError.Length > 0 ? this.client.LastError : "加入失败");
@@ -153,6 +166,8 @@ internal sealed class SyncCoordinator
             return;
         }
 
+        this.SyncIdentity();
+
         RoomState? next = Interlocked.Exchange(ref this.pending, null);
         if (next != null)
             this.ApplyState(next);
@@ -181,6 +196,23 @@ internal sealed class SyncCoordinator
             this.lastHostTick = DateTime.UtcNow;
             this.HostTick();
         }
+    }
+
+    /// <summary>把身份同步成当前角色；换角色时自动用新身份重新加入房间。</summary>
+    private void SyncIdentity()
+    {
+        string id = this.Identity;
+        if (string.IsNullOrWhiteSpace(id) || id == this.cfg.SyncClientId)
+            return;
+
+        bool hadRoom = !string.IsNullOrEmpty(this.cfg.SyncRoomCode) && this.room != null;
+
+        Service.Log.Info($"[Sync] identity -> {id}");
+        this.cfg.SyncClientId = id;
+        this.cfg.Save();
+
+        if (hadRoom)
+            _ = this.client.JoinAsync(this.cfg.SyncRoomCode, id, id);
     }
 
     private void ApplyState(RoomState st)
