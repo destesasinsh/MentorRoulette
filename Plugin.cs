@@ -15,12 +15,11 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly WindowSystem windowSystem = new("MentorRoulette");
 
-    internal Config          Config     { get; }
-    internal AutoDutyIpc     Ipc        { get; }
-    internal Manager         Manager    { get; }
-    internal ConfigWindow    Window     { get; }
-    internal SyncCoordinator Sync       { get; }
-    internal SyncWindow      SyncWindow { get; }
+    internal Config          Config  { get; }
+    internal AutoDutyIpc     Ipc     { get; }
+    internal Manager         Manager { get; }
+    internal SyncCoordinator Sync    { get; }
+    internal MainWindow      Window  { get; }
 
     private DateTime lastTick = DateTime.MinValue;
 
@@ -33,13 +32,13 @@ public sealed class Plugin : IDalamudPlugin
         this.Config = pi.GetPluginConfig() as Config ?? new Config();
         this.Ipc    = new AutoDutyIpc(pi);
 
-        this.Manager    = new Manager(this.Config, this.Ipc);
-        this.Window     = new ConfigWindow(this);
-        this.Sync       = new SyncCoordinator(this.Config, this.Ipc);
-        this.SyncWindow = new SyncWindow(this);
+        this.Manager = new Manager(this.Config, this.Ipc);
+        this.Sync    = new SyncCoordinator(this.Config, this.Ipc);
+        this.Window  = new MainWindow(this);
+
+        this.Config.Migrate();
 
         this.windowSystem.AddWindow(this.Window);
-        this.windowSystem.AddWindow(this.SyncWindow);
 
         pi.UiBuilder.Draw         += this.Draw;
         pi.UiBuilder.OpenConfigUi += this.OpenConfig;
@@ -87,8 +86,11 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         this.lastTick = DateTime.UtcNow;
-        this.Manager.Tick();
-        this.Sync.Tick();
+
+        if (this.Config.LaunchMode == LaunchMode.Group)
+            this.Sync.Tick();
+        else
+            this.Manager.Tick();
     }
 
     private void OnCommand(string command, string args)
@@ -97,9 +99,16 @@ public sealed class Plugin : IDalamudPlugin
         {
             case "":
             case "config":
-                this.SyncWindow.IsOpen = true;
+                this.Window.IsOpen = true;
                 break;
             case "solo":
+                this.Config.LaunchMode = LaunchMode.Solo;
+                this.Config.Save();
+                this.Window.IsOpen = true;
+                break;
+            case "group":
+                this.Config.LaunchMode = LaunchMode.Group;
+                this.Config.Save();
                 this.Window.IsOpen = true;
                 break;
             case "start":
@@ -112,7 +121,7 @@ public sealed class Plugin : IDalamudPlugin
                 this.Manager.CancelLeave();
                 break;
             case "sync":
-                this.SyncWindow.IsOpen = !this.SyncWindow.IsOpen;
+                this.Window.IsOpen = !this.Window.IsOpen;
                 break;
             case "dump":
                 Service.Log.Info(RouletteQueue.DumpList());

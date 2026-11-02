@@ -7,6 +7,12 @@ using Dalamud.Utility;
 using Lumina.Excel;
 using Lumina.Excel.Sheets;
 
+internal sealed class RouletteEntry
+{
+    internal uint   Id   { get; init; }
+    internal string Name { get; init; } = string.Empty;
+}
+
 internal sealed class DutyEntry
 {
     internal uint   TerritoryId { get; init; }
@@ -26,6 +32,9 @@ internal static class DutyCatalog
     private static DateTime lastRefresh = DateTime.MinValue;
 
     internal static IReadOnlyList<DutyEntry> Entries => entries;
+
+    /// <summary>随机任务列表（ContentRoulette）。</summary>
+    internal static readonly List<RouletteEntry> Roulettes = [];
 
     internal static bool IsKnownDuty(uint territoryId) => byTerritory.ContainsKey(territoryId);
 
@@ -64,7 +73,24 @@ internal static class DutyCatalog
         }
 
         entries.Sort((a, b) => a.Level != b.Level ? a.Level.CompareTo(b.Level) : string.CompareOrdinal(a.Name, b.Name));
-        Service.Log.Info($"DutyCatalog: {entries.Count} duties");
+
+        if (Roulettes.Count == 0)
+        {
+            ExcelSheet<ContentRoulette> rouletteSheet = Service.Data.GetExcelSheet<ContentRoulette>();
+
+            if (rouletteSheet != null)
+            {
+                foreach (ContentRoulette r in rouletteSheet)
+                {
+                    string name = r.Name.ToDalamudString().TextValue.Trim();
+
+                    if (name.Length > 0)
+                        Roulettes.Add(new RouletteEntry { Id = r.RowId, Name = name });
+                }
+            }
+        }
+
+        Service.Log.Info($"DutyCatalog: {entries.Count} duties, {Roulettes.Count} roulettes");
     }
 
     /// <summary>向 AutoDuty 刷新每个副本的“是否有路径”。</summary>

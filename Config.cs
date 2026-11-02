@@ -11,6 +11,12 @@ public enum RunMode : byte
     Selected     = 1,
 }
 
+public enum LaunchMode : byte
+{
+    Group = 0,
+    Solo  = 1,
+}
+
 public enum UnsupportedAction : byte
 {
     LeaveDuty = 0,
@@ -23,6 +29,9 @@ public sealed class Config : IPluginConfiguration
     public int Version { get; set; } = 1;
 
     public bool Enabled { get; set; }
+
+    /// <summary>运行方式：组队同步 / 单人导随。UI 只切这一个开关。</summary>
+    public LaunchMode LaunchMode { get; set; } = LaunchMode.Group;
 
     /// <summary>AllSupported = 按 AutoDuty 是否支持来跑；Selected = 完全自定义，只留勾选的副本。</summary>
     public RunMode Mode { get; set; } = RunMode.AllSupported;
@@ -40,6 +49,27 @@ public sealed class Config : IPluginConfiguration
 
     /// <summary>排到不支持的副本时：退本，或者原地挂着。</summary>
     public UnsupportedAction Unsupported { get; set; } = UnsupportedAction.LeaveDuty;
+
+    // ---------- 两种模式共用的行为 ----------
+
+    /// <summary>进对副本后做什么（命令 / AutoDuty / 两者）。</summary>
+    public PostEntry PostEntry { get; set; } = new();
+
+    /// <summary>惩罚等待：all = 全员一起等，leaver = 只有退本端等。</summary>
+    public string PenaltyMode { get; set; } = "all";
+
+    public bool AutoLoop         { get; set; }
+    public int  MaxRounds        { get; set; } = 20;
+    public int  RoundIntervalSec { get; set; } = 10;
+    public int  SuccessMin       { get; set; } = 1;
+
+    // ---------- 排队目标 ----------
+
+    /// <summary>副本清单。空 = 放行全部 AutoDuty 支持的本；非空 = 只用清单里的。</summary>
+    public List<uint> DutyPool { get; set; } = [];
+
+    /// <summary>组队端要排的那个副本（TerritoryType，必须是清单里的）。</summary>
+    public uint PartyDutyTerritory { get; set; }
 
     public int JudgeDelayMs      { get; set; } = 3000;
     public int GraceSeconds      { get; set; } = 3;
@@ -71,6 +101,27 @@ public sealed class Config : IPluginConfiguration
     public List<uint> SyncSelectedDuties { get; set; } = [];
     public RoomOptions                    SyncOptions     { get; set; } = new();
     public Stagger                        SyncStagger     { get; set; } = new();
+
+    /// <summary>把旧版本的白名单/已选副本合并进 DutyPool。</summary>
+    public void Migrate()
+    {
+        if (this.DutyPool.Count == 0)
+        {
+            foreach (uint t in this.Whitelist)
+                if (!this.DutyPool.Contains(t))
+                    this.DutyPool.Add(t);
+        }
+
+        if (this.DutyPool.Count == 0)
+        {
+            foreach (uint t in this.SyncSelectedDuties)
+                if (!this.DutyPool.Contains(t))
+                    this.DutyPool.Add(t);
+        }
+
+        if (this.PartyDutyTerritory == 0 && this.DutyPool.Count > 0)
+            this.PartyDutyTerritory = this.DutyPool[0];
+    }
 
     /// <summary>把客户端身份同步成当前角色名。</summary>
     public string EnsureClientId(string characterName)

@@ -1,9 +1,11 @@
 namespace MentorRoulette;
 
 using System;
+using System.Collections.Generic;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Text;
 using Dalamud.Plugin.Services;
+using MentorRoulette.Sync;
 
 public enum State : byte
 {
@@ -36,6 +38,9 @@ internal sealed class Manager
     private bool joinedQueue;
     private bool lastLeaveWasAbandon;
     private bool dutyCompleted;
+
+    private readonly Queue<string> pendingCommands = new();
+    private DateTime nextCommandAt = DateTime.MinValue;
 
     internal Manager(Config cfg, AutoDutyIpc ipc)
     {
@@ -121,32 +126,65 @@ internal sealed class Manager
         Service.Log.Debug($"[Manager] => {state}: {status}");
     }
 
+    /// <summary>进本后按配置发命令（一行一条，600ms 间隔）。</summary>
+    private void RunPostEntry(uint territory)
+    {
+        PostEntry post = this.cfg.PostEntry;
+        string raw = post.Commands.Length > 0 ? post.Commands : post.Command;
+
+        foreach (string line in raw.Split('\n'))
+        {
+            string cmd = line.Trim();
+
+            if (cmd.Length == 0 || cmd.StartsWith('#'))
+                continue;
+
+            if (!cmd.StartsWith('/'))
+                cmd = "/" + cmd;
+
+            this.pendingCommands.Enqueue(cmd);
+        }
+
+        if (this.pendingCommands.Count > 0)
+            Service.Log.Info($"[Manager] 进本后待发命令 {this.pendingCommands.Count} 条");
+    }
+
+    private void FlushCommands()
+    {
+        if (this.pendingCommands.Count == 0 || DateTime.UtcNow < this.nextCommandAt)
+            return;
+
+        string cmd = this.pendingCommands.Dequeue();
+        this.nextCommandAt = DateTime.UtcNow.AddMilliseconds(600);
+        Service.Log.Info($"[Manager] 发送命令 {cmd}");
+        Service.Commands.ProcessCommand(cmd);
+    }
+
     private void Notify(string message)
     {
         Service.Log.Info($"[MentorRoulette] {message}");
+        DiagLog.Add(message);
 
         if (this.cfg.Notify)
             Service.Chat.Print(new XivChatEntry { Message = $"[导随] {message}" });
     }
 
-    /// <summary>这个副本要不要留下来（跑或挂机），返回 false 就退本。</summary>
+    /// <summary>这个副本要不要留下来（跑或挂机），返回 false 就退本。清单空 = 全部放行。</summary>
     internal bool IsAllowed(uint territory) =>
-        this.cfg.Mode switch
-        {
-            RunMode.AllSupported => this.ipc.HasPath(territory) && !this.cfg.Excluded.Contains(territory),
-            _                    => this.cfg.Whitelist.Contains(territory),
-        };
+        this.cfg.DutyPool.Count == 0
+            ? this.ipc.HasPath(territory)
+            : this.cfg.DutyPool.Contains(territory);
 
     /// <summary>这个副本要不要交给 AutoDuty 自动跑。</summary>
     private bool ShouldStartAutoDuty(uint territory) =>
-        this.cfg.Mode == RunMode.AllSupported
-            ? this.ipc.HasPath(territory)
-            : this.cfg.StartAdInCustomMode && this.ipc.HasPath(territory);
+        this.cfg.PostEntry.Mode is "autoduty" or "both" && this.ipc.HasPath(territory);
 
     internal void Tick()
     {
         if (!this.cfg.Enabled || this.State == State.Stopped)
             return;
+
+        this.FlushCommands();
 
         try
         {
@@ -241,16 +279,15 @@ internal sealed class Manager
             if (this.ShouldStartAutoDuty(territory))
             {
                 this.Notify($"支持 {name}，交给 AutoDuty。");
+                this.RunPostEntry(territory);
                 this.ipc.Run(territory, 1, this.cfg.BareMode);
                 this.SetState(State.Running, $"攻略中：{name}");
                 return;
             }
 
-            // 自定义模式（或没开自动启动）：留下副本，但不接管战斗
-            this.Notify(this.cfg.Mode == RunMode.Selected
-                            ? $"自定义副本 {name} 已保留，不启动 AutoDuty。"
-                            : $"{name} 没有 AutoDuty 路径，保留但不会自动攻略。");
-
+            // 进本后没配自动动作：留下副本，但不接管战斗
+            this.Notify($"{name} 已保留，不启动 AutoDuty。");
+            this.RunPostEntry(territory);
             this.SetState(State.Keeping, $"保留：{name}（未启动 AutoDuty）");
             return;
         }

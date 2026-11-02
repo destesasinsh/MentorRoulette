@@ -1,6 +1,7 @@
 namespace MentorRoulette.Sync;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -58,7 +59,7 @@ internal sealed class SyncCoordinator
     internal string LastError => this.client.LastError;
     internal DateTime PenaltyUntil => this.penaltyUntil;
 
-    internal bool IsHost => this.cfg.SyncEnabled && this.cfg.SyncIsHost;
+    internal bool IsHost => this.cfg.SyncIsHost;
 
     /// <summary>当前游戏角色名，作为同步身份。</summary>
     internal string Identity => Service.Objects.LocalPlayer?.Name.TextValue ?? string.Empty;
@@ -163,9 +164,9 @@ internal sealed class SyncCoordinator
 
     internal void Tick()
     {
-        if (!this.cfg.SyncEnabled)
+        if (this.cfg.LaunchMode != LaunchMode.Group)
         {
-            this.Status = "未启用";
+            this.Status = "单人模式";
             return;
         }
 
@@ -270,6 +271,7 @@ internal sealed class SyncCoordinator
                 this.queuedByUs    = false;
                 this.postEntryDone = false;
                 this.leftEarly     = false;
+                DiagLog.Add($"收到开始信号，{this.myStartAt:HH:mm:ss} 排队");
                 Service.Log.Info($"[Sync] start received, phase={this.room.Phase}, startAt={this.myStartAt:HH:mm:ss}");
                 break;
 
@@ -411,6 +413,7 @@ internal sealed class SyncCoordinator
             this.dutyCompleted    = false;
             this.postEntryDone    = false;
             this.queuedByUs       = false;
+            DiagLog.Add($"进入副本 {DutyCatalog.Get(territory)?.Name ?? territory.ToString()} ({territory})");
             Service.Log.Info($"[Sync] entered duty {territory}");
             this.RunPostEntry(territory);
         }
@@ -432,6 +435,7 @@ internal sealed class SyncCoordinator
         if (this.inDuty && this.myRole == "roulette" && this.myTarget != 0 &&
             this.enteredTerritory != 0 && this.enteredTerritory != this.myTarget && !this.exit.Running)
         {
+            DiagLog.Add($"进错副本 {this.enteredTerritory}（目标 {this.myTarget}），退本");
             Service.Log.Info($"[Sync] wrong duty {this.enteredTerritory} != target {this.myTarget}, leaving");
             this.exit.Start();
         }
@@ -559,6 +563,7 @@ internal sealed class SyncCoordinator
             // 2) 成功
             if (okCount >= Math.Max(1, opt.SuccessMin))
             {
+                DiagLog.Add($"第 {this.room.Round} 轮成功");
                 Service.Log.Info("[Sync] round success");
                 this.CloseRound("next");
                 return;
@@ -652,11 +657,46 @@ internal sealed class SyncCoordinator
 
     internal void PushConfig()
     {
-        if (this.room == null || !this.cfg.SyncIsHost)
+        if (!this.cfg.SyncIsHost)
             return;
 
         _ = this.client.ConfigAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken,
-                                    this.cfg.SyncAssignments, this.cfg.SyncOptions, this.cfg.SyncStagger);
+                                    this.BuildAssignments(), this.BuildOptions(), this.cfg.SyncStagger);
+    }
+
+    /// <summary>把共享配置打包成房间选项。</summary>
+    private RoomOptions BuildOptions() => new()
+    {
+        PenaltyMode      = this.cfg.PenaltyMode,
+        SuccessMin       = this.cfg.SuccessMin,
+        QueueTimeoutSec  = this.cfg.SyncOptions.QueueTimeoutSec,
+        AutoLoop         = this.cfg.AutoLoop,
+        MaxRounds        = this.cfg.MaxRounds,
+        RoundIntervalSec = this.cfg.RoundIntervalSec,
+        PostEntry        = this.cfg.PostEntry,
+    };
+
+    /// <summary>所有「组队排本」成员都用同一个副本（排队目标里的「使用中」）。</summary>
+    private Dictionary<string, Assignment> BuildAssignments()
+    {
+        uint territory = this.cfg.PartyDutyTerritory;
+        uint cfc       = DutyCatalog.Get(territory)?.CfcId ?? 0;
+
+        Dictionary<string, Assignment> result = [];
+
+        foreach ((string id, Assignment a) in this.cfg.SyncAssignments)
+        {
+            result[id] = new Assignment
+            {
+                Role       = a.Role,
+                PartyId    = a.PartyId,
+                Territory  = territory,
+                Cfc        = cfc,
+                RouletteId = this.cfg.RouletteId,
+            };
+        }
+
+        return result;
     }
 
     internal void StartRound()
@@ -667,7 +707,7 @@ internal sealed class SyncCoordinator
         this.roundClosed = false;
         _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "start");
         _ = this.client.ConfigAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken,
-                                    this.cfg.SyncAssignments, this.cfg.SyncOptions, this.cfg.SyncStagger);
+                                    this.BuildAssignments(), this.BuildOptions(), this.cfg.SyncStagger);
         this.lastSignalAt = DateTime.UtcNow;
         Service.Log.Info($"[Sync] start round {this.room.Round}");
     }
