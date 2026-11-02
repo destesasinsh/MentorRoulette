@@ -5,6 +5,6 @@ namespace MentorRoulette.Sync;
 /// </summary>
 internal static class SyncDefaults
 {
-    /// <summary>默认服务器地址（发布前填成自己的地址）。</summary>
-    internal const string ServerUrl = "";
+    /// <summary>默认中继服务器（阿里云 ECS，nginx 反代到 /mr/）。</summary>
+    internal const string ServerUrl = "http://121.40.159.61/mr";
 }

@@ -1,6 +1,17 @@
 # MentorRoulette 中继服务器
 
-零依赖 Node 服务，只做房间/信令/状态中转。
+零依赖中继，只做房间/信令/状态中转。两份等价实现：`server.js`（Node，本地开发）和 `server.py`（Python 3.6+，生产部署，ECS 上只有 python3）。
+
+## 当前部署（已上线）
+
+```
+ECS     i-bp14l55p4tmcczyalsp7 (cn-hangzhou, 121.40.159.61)
+路径    /opt/mentor-roulette/server.py
+服务    systemd: mentor-roulette.service  (127.0.0.1:8787, Restart=always)
+反代    nginx: http://121.40.159.61/mr/  ->  127.0.0.1:8787/
+```
+
+部署脚本见 [mentor-roulette.service](mentor-roulette.service) 和 [patch_nginx.py](patch_nginx.py)。
 
 ## 启动
 

@@ -28,7 +28,8 @@ AutoDuty 本体不再负责排队和退本，只负责「按路径跑这一趟�
 
 多个客户端一起排，让导随端尽量被补进指定的简单副本。
 
-**前置**：一台跑中继服务器的机器（见 [server/README.md](server/README.md)），所有端能访问到它。
+**前置**：中继服务器已内置（http://121.40.159.61/mr），开箱即用，不需要配置。
+想自己搭的话看 [server/README.md](server/README.md)，然后改配置文件的 SyncServerUrl（UI 里不显示地址）。
 
 **步骤**
 

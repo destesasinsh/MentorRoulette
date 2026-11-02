@@ -1,0 +1,14 @@
+[Unit]
+Description=MentorRoulette relay (group sync)
+After=network.target
+
+[Service]
+Type=simple
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+ExecStart=/usr/bin/python3 /opt/mentor-roulette/server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
