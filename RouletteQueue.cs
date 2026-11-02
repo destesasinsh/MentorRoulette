@@ -59,6 +59,18 @@ internal sealed unsafe class RouletteQueue
         if (!Service.ClientState.IsLoggedIn || Service.Objects.LocalPlayer == null)
             return;
 
+        // 优先走原生 RequestContentsFinder（DailyRoutines 同款），不用点界面
+        if (QueueController.NativeAvailable)
+        {
+            if ((DateTime.UtcNow - this.lastOpen).TotalSeconds < 3)
+                return;
+
+            this.lastOpen = DateTime.UtcNow;
+            QueueController.QueueRoulette(rouletteRowId);
+            this.joinFired = true;
+            return;
+        }
+
         if (!AddonHelper.TryGetReady("ContentsFinder", out AtkUnitBase* addon))
         {
             if ((DateTime.UtcNow - this.lastOpen).TotalSeconds < 3)

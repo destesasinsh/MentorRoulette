@@ -18,4 +18,5 @@ public sealed class Service
     [PluginService] public static ICondition             Condition       { get; private set; } = null!;
     [PluginService] public static IObjectTable           Objects         { get; private set; } = null!;
     [PluginService] public static IPartyList             PartyList       { get; private set; } = null!;
+    [PluginService] public static ISigScanner            Sig             { get; private set; } = null!;
 }

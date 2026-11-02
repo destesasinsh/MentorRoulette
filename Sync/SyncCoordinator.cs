@@ -33,6 +33,7 @@ internal sealed class SyncCoordinator
     private DateTime lastReport   = DateTime.MinValue;
     private DateTime lastHostTick = DateTime.MinValue;
     private DateTime lastSignalAt = DateTime.MinValue;
+    private DateTime lastQueueAttempt = DateTime.MinValue;
     private DateTime roundEndedAt = DateTime.MinValue;
     private bool     roundClosed  = false;
 
@@ -380,7 +381,15 @@ internal sealed class SyncCoordinator
         }
 
         if (this.queuedByUs)
-            return; // 已经点过一次，等结果
+        {
+            // 发过请求但 10 秒还没进队列 → 允许重试一次
+            if ((DateTime.UtcNow - this.lastQueueAttempt).TotalSeconds < 10)
+                return;
+
+            this.queuedByUs = false;
+        }
+
+        this.lastQueueAttempt = DateTime.UtcNow;
 
         if (this.myRole == "party")
             QueueController.QueueDuty(this.myCfc);
