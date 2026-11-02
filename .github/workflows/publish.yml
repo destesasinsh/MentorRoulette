@@ -1,0 +1,112 @@
+name: Build & Publish
+
+# 打 tag（v0.0.0.2）才发布；手动触发需要填版本号。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要发布的版本号（例如 0.0.0.2）'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    env:
+      META_REPO: destesasinsh/DalamudPlugins
+      PLUGIN: MentorRoulette
+      HAS_PAT: ${{ secrets.DALAMUDPLUGINS_PAT != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version from tag
+        shell: pwsh
+        run: |
+          $raw = if ("$env:GITHUB_REF_TYPE" -eq 'tag') { $env:GITHUB_REF_NAME } else { "${{ inputs.version }}" }
+          if (-not $raw) { throw '手动触发时必须填写 version' }
+          $raw = $raw -replace '^[vV]', ''
+          $parts = $raw.Split('.')
+          while ($parts.Length -lt 4) { $parts += '0' }
+          if ($parts.Length -gt 4) { throw "版本号格式错误: $raw" }
+          $ver = $parts -join '.'
+          Write-Host "publishing version $ver"
+          "NEW_VERSION=$ver" >> $env:GITHUB_ENV
+
+      - name: Download Dalamud
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile dalamud.zip
+          Expand-Archive dalamud.zip -DestinationPath dalamud
+
+      - name: Patch csproj version
+        shell: pwsh
+        run: |
+          $csproj = "MentorRoulette.csproj"
+          $text = Get-Content $csproj -Raw
+          $text = [regex]::Replace($text, '<Version>[^<]+</Version>', "<Version>$env:NEW_VERSION</Version>")
+          Set-Content -Path $csproj -Value $text -NoNewline
+          Select-String -Path $csproj -Pattern '<Version>'
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $lib = (Join-Path $env:GITHUB_WORKSPACE "dalamud") + "/"
+          dotnet build MentorRoulette.csproj -c Release -p:DalamudLibPath=$lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Pack latest.zip
+        shell: pwsh
+        run: |
+          $pkg = "bin/Release/$env:PLUGIN/latest.zip"
+          if (-not (Test-Path $pkg)) { throw "找不到 Dalamud 打包产物: $pkg" }
+          Copy-Item $pkg "latest.zip" -Force
+          Get-Item latest.zip | Select-Object Name, Length
+
+      - name: Publish to DalamudPlugins
+        if: env.HAS_PAT == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DALAMUDPLUGINS_PAT }}
+        run: |
+          set -euo pipefail
+          TAG="${PLUGIN}-v${NEW_VERSION}"
+          echo "publishing $TAG"
+
+          if gh release view "$TAG" --repo "$META_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" latest.zip --repo "$META_REPO" --clobber
+          else
+            gh release create "$TAG" latest.zip --repo "$META_REPO" --title "$TAG" --target main --generate-notes
+          fi
+
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${META_REPO}.git" meta
+          cd meta
+          python - "$NEW_VERSION" "$PLUGIN" <<'PY'
+          import json, sys, pathlib
+          version, plugin = sys.argv[1], sys.argv[2]
+          path = pathlib.Path(f"plugins/{plugin}/{plugin}.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          data["AssemblyVersion"] = version
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print("manifest ->", version)
+          PY
+          python generate_pluginmaster.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(publish): ${PLUGIN} v${NEW_VERSION}" || echo "nothing to commit"
+          git push

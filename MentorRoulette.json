@@ -1,0 +1,13 @@
+{
+  "Author": "destesasinsh",
+  "Name": "导随助手",
+  "Punchline": "自动排导师随机，支持的本交给 AutoDuty，不支持的本自动退。",
+  "Description": "自动排「导师随机任务」，进本后判断该副本 AutoDuty 是否支持：\n支持则通过 IPC 让 AutoDuty 自动攻略并跑完；不支持则按配置退出副本、等待放弃惩罚结束后重新排队。\n需要安装并启用 AutoDuty。",
+  "InternalName": "MentorRoulette",
+  "DalamudApiLevel": "15",
+  "MinimumDalamudVersion": "15.0.0.0",
+  "ApplicableVersion": "any",
+  "RepoUrl": "https://github.com/destesasinsh/MentorRoulette",
+  "Tags": [ "duty", "automation", "roulette" ],
+  "AcceptsFeedback": true
+}
