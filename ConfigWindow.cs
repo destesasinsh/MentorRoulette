@@ -150,9 +150,12 @@ internal sealed class ConfigWindow : Window, IDisposable
     {
         bool custom = cfg.Mode == RunMode.Selected;
 
+        // 注意：### 后面的 ID 必须固定，否则数量一变折叠状态就丢（会自己收起）
+        int enabledCount = DutyCatalog.SupportedEntries.Count(e => !cfg.Excluded.Contains(e.TerritoryId));
+
         string header = custom
-                            ? $"自定义副本列表（已选 {cfg.Whitelist.Count}）"
-                            : $"AutoDuty 支持的副本（{DutyCatalog.SupportedCount}）";
+                            ? $"自定义副本列表（已选 {cfg.Whitelist.Count}）###dutyList"
+                            : $"AutoDuty 支持的副本（{enabledCount}/{DutyCatalog.SupportedCount}）###dutyList";
 
         if (!ImGui.CollapsingHeader(header))
             return;
@@ -181,6 +184,24 @@ internal sealed class ConfigWindow : Window, IDisposable
                 cfg.Save();
             }
         }
+        else
+        {
+            ImGui.SameLine();
+
+            if (ImGui.Button("全选"))
+            {
+                cfg.Excluded.Clear();
+                cfg.Save();
+            }
+
+            ImGui.SameLine();
+
+            if (ImGui.Button("全不选"))
+            {
+                cfg.Excluded = DutyCatalog.SupportedEntries.Select(e => e.TerritoryId).ToList();
+                cfg.Save();
+            }
+        }
 
         ImGui.SetNextItemWidth(220);
         ImGui.InputTextWithHint("##search", "搜索副本…", ref this.search, 128);
@@ -194,11 +215,13 @@ internal sealed class ConfigWindow : Window, IDisposable
                 if (this.search.Length > 0 && !duty.Name.Contains(this.search, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                if (custom)
-                {
-                    bool picked = cfg.Whitelist.Contains(duty.TerritoryId);
+                bool picked = custom
+                                  ? cfg.Whitelist.Contains(duty.TerritoryId)
+                                  : !cfg.Excluded.Contains(duty.TerritoryId);
 
-                    if (ImGui.Checkbox($"##duty{duty.TerritoryId}", ref picked))
+                if (ImGui.Checkbox($"##duty{duty.TerritoryId}", ref picked))
+                {
+                    if (custom)
                     {
                         if (picked)
                         {
@@ -209,12 +232,19 @@ internal sealed class ConfigWindow : Window, IDisposable
                         {
                             cfg.Whitelist.Remove(duty.TerritoryId);
                         }
-
-                        cfg.Save();
+                    }
+                    else
+                    {
+                        if (picked)
+                            cfg.Excluded.Remove(duty.TerritoryId);
+                        else if (!cfg.Excluded.Contains(duty.TerritoryId))
+                            cfg.Excluded.Add(duty.TerritoryId);
                     }
 
-                    ImGui.SameLine();
+                    cfg.Save();
                 }
+
+                ImGui.SameLine();
 
                 ImGui.TextUnformatted(duty.Name);
                 ImGui.SameLine();
@@ -225,6 +255,11 @@ internal sealed class ConfigWindow : Window, IDisposable
                     ImGui.SameLine();
                     ImGui.TextColored(duty.HasPath ? new Vector4(0.4f, 0.9f, 0.4f, 1f) : new Vector4(0.7f, 0.7f, 0.7f, 1f),
                                       duty.HasPath ? "AD 支持" : "AD 无路径");
+                }
+                else if (cfg.Excluded.Contains(duty.TerritoryId))
+                {
+                    ImGui.SameLine();
+                    ImGui.TextDisabled("已排除");
                 }
             }
         }

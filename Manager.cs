@@ -133,7 +133,7 @@ internal sealed class Manager
     internal bool IsAllowed(uint territory) =>
         this.cfg.Mode switch
         {
-            RunMode.AllSupported => this.ipc.HasPath(territory),
+            RunMode.AllSupported => this.ipc.HasPath(territory) && !this.cfg.Excluded.Contains(territory),
             _                    => this.cfg.Whitelist.Contains(territory),
         };
 

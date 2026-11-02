@@ -250,7 +250,7 @@ internal sealed class SyncWindow : Window
 
     private void DrawDutySelector(Config cfg)
     {
-        if (!ImGui.CollapsingHeader($"副本选择（已选 {cfg.SyncSelectedDuties.Count}）"))
+        if (!ImGui.CollapsingHeader($"副本选择（已选 {cfg.SyncSelectedDuties.Count}）###dutySelector"))
             return;
 
         float height = 220f;

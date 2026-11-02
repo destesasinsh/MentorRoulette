@@ -30,6 +30,9 @@ public sealed class Config : IPluginConfiguration
     /// <summary>自定义模式下的白名单（TerritoryType）。</summary>
     public List<uint> Whitelist { get; set; } = [];
 
+    /// <summary>AutoDuty 支持模式下的排除项（取消勾选的副本）。</summary>
+    public List<uint> Excluded { get; set; } = [];
+
     /// <summary>
     /// 自定义模式下是否也自动启动 AutoDuty。默认关：自定义模式只负责「留下这些副本」，不接管战斗。
     /// </summary>
