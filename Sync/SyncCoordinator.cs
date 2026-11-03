@@ -545,6 +545,12 @@ internal sealed class SyncCoordinator
 
         RoomOptions opt = this.room.Options;
 
+        // 队长端的判定用本地配置，改完立刻生效，不用等下一轮下发
+        int  maxRounds   = this.cfg.MaxRounds;      // 0 = 不限
+        int  intervalSec = this.cfg.RoundIntervalSec;
+        bool autoLoop    = this.cfg.AutoLoop;
+        int  successMin  = this.cfg.SuccessMin;
+
         if (this.room.Phase == "queueing")
         {
             if (this.roundClosed)
@@ -570,7 +576,7 @@ internal sealed class SyncCoordinator
             }
 
             // 2) 成功
-            if (okCount >= Math.Max(1, opt.SuccessMin))
+            if (okCount >= Math.Max(1, successMin))
             {
                 DiagLog.Add($"第 {this.room.Round} 轮成功");
                 Service.Log.Info("[Sync] round success");
@@ -596,21 +602,22 @@ internal sealed class SyncCoordinator
         if (this.room.Phase != "idle" || !this.roundClosed)
             return;
 
-        if (!opt.AutoLoop)
+        if (!autoLoop)
             return;
 
-        if (this.room.Round > opt.MaxRounds)
+        if (maxRounds > 0 && this.room.Round > maxRounds)
         {
             if ((DateTime.UtcNow - this.lastSignalAt).TotalSeconds > 30)
             {
                 this.lastSignalAt = DateTime.UtcNow;
-                Service.Log.Info($"[Sync] 已到轮次上限 {opt.MaxRounds}，停止自动循环");
+                Service.Log.Info($"[Sync] 已到轮次上限 {maxRounds}，停止自动循环");
+                DiagLog.Add($"已到轮次上限 {maxRounds}，停止自动循环");
             }
 
             return;
         }
 
-        DateTime earliest = this.roundEndedAt.AddSeconds(Math.Max(0, opt.RoundIntervalSec));
+        DateTime earliest = this.roundEndedAt.AddSeconds(Math.Max(0, intervalSec));
         DateTime penalty  = this.EffectivePenalty();
 
         if (penalty > earliest)
@@ -629,7 +636,17 @@ internal sealed class SyncCoordinator
         DiagLog.Add($"自动开始第 {this.room.Round} 轮");
         this.lastSignalAt = DateTime.UtcNow;
         this.roundClosed  = false;
-        _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "start");
+
+        string code  = this.cfg.SyncRoomCode;
+        string token = this.cfg.SyncHostToken;
+
+        // 先下发配置（轮次上限/间隔可能刚改过），再开排，保证顺序
+        _ = Task.Run(async () =>
+        {
+            await this.client.ConfigAsync(code, token, this.BuildAssignments(), this.BuildOptions(), this.cfg.SyncStagger)
+                      .ConfigureAwait(false);
+            await this.client.SignalAsync(code, token, "start").ConfigureAwait(false);
+        });
     }
 
     private void CloseRound(string signal)

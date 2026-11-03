@@ -38,7 +38,7 @@ def default_options():
         'successMin': 1,
         'queueTimeoutSec': 300,
         'autoLoop': False,
-        'maxRounds': 20,
+        'maxRounds': 0,
         'roundIntervalSec': 10,
         'postEntry': {'mode': 'nothing', 'command': ''},
         'allowLateJoin': True,

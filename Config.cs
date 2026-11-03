@@ -59,7 +59,8 @@ public sealed class Config : IPluginConfiguration
     public string PenaltyMode { get; set; } = "all";
 
     public bool AutoLoop         { get; set; }
-    public int  MaxRounds        { get; set; } = 20;
+    /// <summary>轮次上限；0 = 不限。</summary>
+    public int  MaxRounds        { get; set; }
     public int  RoundIntervalSec { get; set; } = 10;
     public int  SuccessMin       { get; set; } = 1;
 

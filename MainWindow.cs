@@ -517,9 +517,12 @@ internal sealed class MainWindow : Window
         int maxRounds = cfg.MaxRounds;
         if (ImGui.InputInt("轮次上限", ref maxRounds))
         {
-            cfg.MaxRounds = Math.Clamp(maxRounds, 1, 999);
+            cfg.MaxRounds = Math.Clamp(maxRounds, 0, 99999);
             cfg.Save();
         }
+
+        ImGui.SameLine();
+        ImGui.TextDisabled(cfg.MaxRounds == 0 ? "（0 = 不限）" : $"打完 {cfg.MaxRounds} 轮停");
 
         ImGui.SameLine();
         ImGui.SetNextItemWidth(90);
@@ -549,7 +552,10 @@ internal sealed class MainWindow : Window
 
         RoomState? room = this.Sync.Room;
         if (room != null)
-            ImGui.TextDisabled($"第 {room.Round} / {room.Options.MaxRounds} 轮 · {room.Phase}");
+        {
+            string limit = cfg.MaxRounds == 0 ? "不限" : cfg.MaxRounds.ToString();
+            ImGui.TextDisabled($"第 {room.Round} 轮（上限 {limit}）· {room.Phase}");
+        }
     }
 
     // ---------- 按钮 ----------

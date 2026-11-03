@@ -63,7 +63,7 @@ function defaultOptions() {
     successMin: 1,             // 至少几个导随端进目标本算成功
     queueTimeoutSec: 300,      // 排队多久没匹配就放弃本轮
     autoLoop: false,           // 打完自动下一轮
-    maxRounds: 20,
+    maxRounds: 0,
     postEntry: { mode: 'nothing', autoDuty: false, command: '' },
     allowLateJoin: true,
   };
