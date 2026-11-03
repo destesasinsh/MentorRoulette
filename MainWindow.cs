@@ -580,6 +580,12 @@ internal sealed class MainWindow : Window
                     this.Sync.NextRound();
             }
 
+            if (this.Sync.PendingStart)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 0.75f, 0.3f, 1f), "等待成员就绪…");
+            }
+
             return;
         }
 

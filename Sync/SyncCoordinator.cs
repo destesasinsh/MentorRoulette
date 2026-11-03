@@ -35,6 +35,7 @@ internal sealed class SyncCoordinator
     private DateTime lastSignalAt = DateTime.MinValue;
     private DateTime lastQueueAttempt = DateTime.MinValue;
     private DateTime roundEndedAt = DateTime.MinValue;
+    private bool     pendingStart;
     private bool     roundClosed  = false;
 
     private readonly System.Collections.Generic.Queue<string> pendingCommands = new();
@@ -55,6 +56,9 @@ internal sealed class SyncCoordinator
     }
 
     internal RoomState? Room => this.room;
+
+    /// <summary>已点开始，正在等全员就绪。</summary>
+    internal bool PendingStart => this.pendingStart;
     internal string Status { get; private set; } = "未连接";
     internal bool   Connected => this.client.Connected && this.room != null;
     internal string LastError => this.client.LastError;
@@ -520,9 +524,15 @@ internal sealed class SyncCoordinator
         if (this.room == null || this.cfg.SyncRoomCode.Length == 0)
             return;
 
+        bool busy = Service.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas] ||
+                    Service.Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInCutSceneEvent];
+
         ClientReport report = new()
         {
-            State        = this.inDuty ? "in_duty" : QueueController.InQueue ? "queued" : "idle",
+            State        = this.inDuty ? "in_duty"
+                                : QueueController.InQueue ? "queued"
+                                : busy ? "busy"
+                                : "idle",
             Role         = this.myRole,
             Territory    = this.enteredTerritory,
             Target       = this.myTarget,
@@ -548,6 +558,25 @@ internal sealed class SyncCoordinator
             return;
 
         RoomOptions opt = this.room.Options;
+
+        // 等待全员就绪再开排
+        if (this.pendingStart)
+        {
+            if (this.room.Phase == "queueing")
+            {
+                this.pendingStart = false;
+            }
+            else if (this.AllMembersReady(out _) && DateTime.UtcNow >= this.EffectivePenalty())
+            {
+                this.pendingStart = false;
+                this.SendStart();
+                return;
+            }
+            else
+            {
+                return;
+            }
+        }
 
         // 队长端的判定用本地配置，改完立刻生效，不用等下一轮下发
         int  maxRounds   = this.cfg.MaxRounds;      // 0 = 不限
@@ -731,17 +760,65 @@ internal sealed class SyncCoordinator
         return result;
     }
 
+    /// <summary>所有在线成员都处于空闲（不在本里 / 不在队列 / 不在过场）才允许开排。</summary>
+    private bool AllMembersReady(out string waiting)
+    {
+        waiting = string.Empty;
+
+        if (this.room == null)
+            return false;
+
+        List<string> notReady = [];
+
+        foreach (ClientBox c in this.room.Clients.Values)
+        {
+            if (!c.Online)
+                continue;
+
+            string state = c.Report?.State ?? "unknown";
+
+            if (state != "idle")
+                notReady.Add($"{c.Id}({state})");
+        }
+
+        waiting = string.Join("、", notReady);
+        return notReady.Count == 0;
+    }
+
     internal void StartRound()
     {
         if (this.room == null || !this.cfg.SyncIsHost)
             return;
 
+        if (!this.AllMembersReady(out string waiting))
+        {
+            this.pendingStart = true;
+            DiagLog.Add($"等待成员就绪：{waiting}");
+            Service.Log.Info($"[Sync] start pending, waiting for: {waiting}");
+            return;
+        }
+
+        this.pendingStart = false;
+        this.SendStart();
+    }
+
+    private void SendStart()
+    {
         this.roundClosed = false;
-        _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "start");
-        _ = this.client.ConfigAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken,
-                                    this.BuildAssignments(), this.BuildOptions(), this.cfg.SyncStagger);
+
+        string code  = this.cfg.SyncRoomCode;
+        string token = this.cfg.SyncHostToken;
+
+        _ = Task.Run(async () =>
+        {
+            await this.client.ConfigAsync(code, token, this.BuildAssignments(), this.BuildOptions(), this.cfg.SyncStagger)
+                      .ConfigureAwait(false);
+            await this.client.SignalAsync(code, token, "start").ConfigureAwait(false);
+        });
+
         this.lastSignalAt = DateTime.UtcNow;
-        Service.Log.Info($"[Sync] start round {this.room.Round}");
+        DiagLog.Add($"开始第 {this.room?.Round} 轮");
+        Service.Log.Info($"[Sync] start round {this.room?.Round}");
     }
 
     internal void Abort()
@@ -749,6 +826,7 @@ internal sealed class SyncCoordinator
         if (this.room == null || !this.cfg.SyncIsHost)
             return;
 
+        this.pendingStart = false;
         this.CancelMyQueue();
         this.queuedByUs = false;
         DiagLog.Add("中止本轮");
