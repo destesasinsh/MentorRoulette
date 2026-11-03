@@ -105,6 +105,17 @@ internal static unsafe class QueueController
                 var fn = Marshal.GetDelegateForFunctionPointer<RequestRouletteDelegate>(RequestRoulettePtr);
                 fn((ushort)rouletteId, ref option);
                 Service.Log.Info($"[Queue] native RequestRoulette({rouletteId})");
+
+                // 原生没把我们送进队列时，退回到「打开任务搜索器选好随机任务」，
+                // 下一帧由 AcceptPop/界面路径接手
+                if (!InQueue)
+                {
+                    var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentContentsFinder.Instance();
+
+                    if (agent != null)
+                        agent->OpenRouletteDuty((byte)rouletteId);
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -140,6 +151,10 @@ internal static unsafe class QueueController
 
                 bool ok = fn(ids, 1, 0, ref option);
                 Service.Log.Info($"[Queue] native RequestDuty({cfcId}) -> {ok}");
+
+                if (!ok && FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentContentsFinder.Instance() != null)
+                    FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentContentsFinder.Instance()->OpenRegularDuty(cfcId);
+
                 return ok;
             }
             catch (Exception ex)

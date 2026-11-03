@@ -382,21 +382,25 @@ internal sealed class SyncCoordinator
 
         if (this.queuedByUs)
         {
-            // 发过请求但 10 秒还没进队列 → 允许重试一次
-            if ((DateTime.UtcNow - this.lastQueueAttempt).TotalSeconds < 10)
+            // 发过请求但还没进队列 → 2.5 秒后重试（之前是 10 秒，第二个端会明显晚开始）
+            if ((DateTime.UtcNow - this.lastQueueAttempt).TotalSeconds < 2.5)
                 return;
 
             this.queuedByUs = false;
+            DiagLog.Add("排队没生效，重试");
         }
 
         this.lastQueueAttempt = DateTime.UtcNow;
+        this.queuedByUs       = true;
 
-        if (this.myRole == "party")
-            QueueController.QueueDuty(this.myCfc);
-        else
-            QueueController.QueueRoulette(this.room.Assignments[this.cfg.SyncClientId].RouletteId);
+        uint rouletteId = this.room.Assignments[this.cfg.SyncClientId].RouletteId;
+        bool ok = this.myRole == "party"
+                      ? QueueController.QueueDuty(this.myCfc)
+                      : QueueController.QueueRoulette(rouletteId);
 
-        this.queuedByUs = true;
+        DiagLog.Add(this.myRole == "party"
+                        ? $"开始排队：副本 {this.myCfc}（{ok}）"
+                        : $"开始排队：随机 {rouletteId}（{ok}）");
     }
 
     private void CancelMyQueue()
