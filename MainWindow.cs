@@ -55,6 +55,12 @@ internal sealed class MainWindow : Window
             ImGui.EndTabItem();
         }
 
+        if (ImGui.BeginTabItem("使用说明"))
+        {
+            this.DrawHelpTab();
+            ImGui.EndTabItem();
+        }
+
         if (ImGui.BeginTabItem("日志"))
         {
             this.DrawLogTab();
@@ -613,6 +619,63 @@ internal sealed class MainWindow : Window
     }
 
     // ---------- 日志 ----------
+
+    private void DrawHelpTab()
+    {
+        using (ImRaii.Child("##helpBody", new Vector2(0, 0), false))
+        {
+            ImGui.TextColored(new Vector4(0.6f, 0.85f, 1f, 1f), "导随助手 · 使用说明");
+            ImGui.TextWrapped("自动排导师随机任务，并支持多台客户端协同排本：进本后按设置执行宏命令或交给 AutoDuty。");
+
+            this.Help("一、运行方式（窗口顶部切换）");
+            ImGui.BulletText("组队同步：多台游戏客户端加入同一个房间，由队长统一下发分工、统一开排。");
+            ImGui.BulletText("单人导随：只有自己，按下面的规则自动排队、判定、循环。");
+
+            this.Help("二、组队同步流程");
+            ImGui.BulletText("1. 队长点「创建房间」，用「复制房间号」把 6 位码发给其他人。");
+            ImGui.BulletText("2. 其他人输码「加入房间」；身份就是当前游戏角色名，不用手填。");
+            ImGui.BulletText("3. 队长在「成员与分工」里把每个端设成「导随」或「组队排本」。");
+            ImGui.BulletText("4. 在「排队目标」里选好副本，点「下发分工」。");
+            ImGui.BulletText("5. 点「开始本轮」：等所有成员回到空闲状态后，各端按同一时刻开排。");
+
+            this.Help("三、排队目标（最关键的设置）");
+            ImGui.BulletText("随机任务：导随端和单人单开排的就是这个（默认导师随机 9）。");
+            ImGui.BulletText("副本清单：左边点一下加到右边。清单为空 = 放行全部 AutoDuty 支持的本；非空 = 只放行清单里的。");
+            ImGui.BulletText("组队端排的是清单里标「组队端使用中」的那条 —— 选中后点「把选中的副本设为组队端副本」。");
+
+            this.Help("四、进本后");
+            ImGui.BulletText("什么都不做 / 执行宏 / 启动 AutoDuty / 两者都做，四选一。");
+            ImGui.BulletText("宏一行一条，按顺序发（间隔 600ms），# 开头是注释，不带 / 会自动补上。");
+            ImGui.BulletText("只在「进对了本」时执行：组队看目标副本，单人看清单里是否有这个本。");
+
+            this.Help("五、进错 / 不支持时");
+            ImGui.BulletText("退本：吃 30 分钟放弃惩罚；挂机：不吃惩罚但这轮很久。");
+            ImGui.BulletText("「立即退本」勾上就不等脱战，适合进错秒退。");
+            ImGui.BulletText("惩罚等待：全员一起等 / 只有退本那端等（单人模式此选项无效）。");
+
+            this.Help("六、循环");
+            ImGui.BulletText("自动下一轮：一轮结束后等「每轮间隔」再开下一轮。");
+            ImGui.BulletText("轮次上限：0 = 不限；填多少就打多少轮。");
+            ImGui.BulletText("成功所需导随端数：至少有这么多导随端进对了本，本轮才算成功。");
+
+            this.Help("七、命令");
+            ImGui.BulletText("/mentor 打开本窗口；/mentor solo 或 group 切换运行方式");
+            ImGui.BulletText("/mentor start 开始，/mentor stop 停止（会取消排队），/mentor status 看状态");
+            ImGui.BulletText("/mentor cancel 取消本次退本；/mentor dump 打任务搜索器列表到日志");
+
+            this.Help("八、常见问题");
+            ImGui.BulletText("一直排不上：先看日志有没有「开始排队」；再看是不是在惩罚等待；确认清单没有把要排的本排除掉。");
+            ImGui.BulletText("只有一端开始排：注意界面上的「等待成员就绪…」，它没消失说明还有端在本里/队列里。");
+            ImGui.BulletText("进错本：导随端会自动退本并记录惩罚，按上面的惩罚设置等待。");
+            ImGui.BulletText("排本确认：匹配弹窗会自动点确定，不需要手动操作。");
+        }
+    }
+
+    private void Help(string title)
+    {
+        ImGui.Spacing();
+        ImGui.TextColored(new Vector4(0.85f, 0.85f, 0.5f, 1f), title);
+    }
 
     private void DrawLogTab()
     {
