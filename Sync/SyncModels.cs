@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 
 public sealed class RoomState
 {
+    [JsonPropertyName("serverTime")] public long ServerTime { get; set; }
     [JsonPropertyName("code")]       public string Code { get; set; } = string.Empty;
     [JsonPropertyName("rev")]        public long Rev { get; set; }
     [JsonPropertyName("phase")]      public string Phase { get; set; } = "idle";

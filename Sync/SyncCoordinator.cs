@@ -36,6 +36,7 @@ internal sealed class SyncCoordinator
     private DateTime lastQueueAttempt = DateTime.MinValue;
     private DateTime roundEndedAt = DateTime.MinValue;
     private bool     pendingStart;
+    private long     clockOffsetMs;   // 服务器时间 - 本地时间
     private bool     roundClosed  = false;
 
     private readonly System.Collections.Generic.Queue<string> pendingCommands = new();
@@ -155,7 +156,7 @@ internal sealed class SyncCoordinator
 
                 try
                 {
-                    await Task.Delay(2000, token).ConfigureAwait(false);
+                    await Task.Delay(1500, token).ConfigureAwait(false);
                 }
                 catch (TaskCanceledException)
                 {
@@ -229,6 +230,9 @@ internal sealed class SyncCoordinator
     private void ApplyState(RoomState st)
     {
         this.room = st;
+
+        if (st.ServerTime > 0)
+            this.clockOffsetMs = st.ServerTime - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         if (st.Round != this.appliedRound)
         {
@@ -313,7 +317,12 @@ internal sealed class SyncCoordinator
         }
 
         int stagger = this.myRole == "party" ? this.room.Stagger.Party : this.room.Stagger.Roulette;
-        this.myStartAt = DateTimeOffset.FromUnixTimeMilliseconds(this.room.StartAt + stagger).UtcDateTime;
+
+        // 用「服务器时间轴」换算成本地时刻：本地到点时间 = 目标服务器时刻 - 偏移
+        long targetServer = this.room.StartAt + stagger;
+        long targetLocal  = targetServer - this.clockOffsetMs;
+
+        this.myStartAt = DateTimeOffset.FromUnixTimeMilliseconds(targetLocal).UtcDateTime;
     }
 
     // ---------- 排队 ----------
@@ -674,11 +683,14 @@ internal sealed class SyncCoordinator
         string token = this.cfg.SyncHostToken;
 
         // 先下发配置（轮次上限/间隔可能刚改过），再开排，保证顺序
+        // 提前 5 秒，保证各端在下一轮轮询里都能拿到（轮询 1.5 秒）
+        long startAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + this.clockOffsetMs + 5000;
+
         _ = Task.Run(async () =>
         {
             await this.client.ConfigAsync(code, token, this.BuildAssignments(), this.BuildOptions(), this.cfg.SyncStagger)
                       .ConfigureAwait(false);
-            await this.client.SignalAsync(code, token, "start").ConfigureAwait(false);
+            await this.client.SignalAsync(code, token, "start", null, startAtMs).ConfigureAwait(false);
         });
     }
 
@@ -809,11 +821,14 @@ internal sealed class SyncCoordinator
         string code  = this.cfg.SyncRoomCode;
         string token = this.cfg.SyncHostToken;
 
+        // 提前 5 秒，保证各端在下一轮轮询里都能拿到（轮询 1.5 秒）
+        long startAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + this.clockOffsetMs + 5000;
+
         _ = Task.Run(async () =>
         {
             await this.client.ConfigAsync(code, token, this.BuildAssignments(), this.BuildOptions(), this.cfg.SyncStagger)
                       .ConfigureAwait(false);
-            await this.client.SignalAsync(code, token, "start").ConfigureAwait(false);
+            await this.client.SignalAsync(code, token, "start", null, startAtMs).ConfigureAwait(false);
         });
 
         this.lastSignalAt = DateTime.UtcNow;

@@ -101,6 +101,7 @@ function publicState(room, sinceRev, sinceSeq) {
   }
 
   return {
+    serverTime: now(),
     code: room.code,
     name: room.name,
     rev: room.rev,

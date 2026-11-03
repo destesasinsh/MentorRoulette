@@ -113,6 +113,7 @@ def public_state(room):
             'report': c.get('report'),
         }
     return {
+        'serverTime': t,
         'code': room['code'],
         'name': room['name'],
         'rev': room['rev'],

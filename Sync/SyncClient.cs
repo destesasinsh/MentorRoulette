@@ -86,8 +86,8 @@ internal sealed class SyncClient : IDisposable
     internal Task<object?> ConfigAsync(string code, string hostToken, object assignments, RoomOptions options, Stagger stagger) =>
         this.CallAsync<object>(HttpMethod.Post, $"/room/{code}/config", new { hostToken, assignments, options, stagger });
 
-    internal Task<object?> SignalAsync(string code, string hostToken, string type, string? target = null) =>
-        this.CallAsync<object>(HttpMethod.Post, $"/room/{code}/signal", new { hostToken, type, target });
+    internal Task<object?> SignalAsync(string code, string hostToken, string type, string? target = null, long? startAt = null) =>
+        this.CallAsync<object>(HttpMethod.Post, $"/room/{code}/signal", new { hostToken, type, target, startAt });
 
     internal Task<object?> LeaveAsync(string code, string clientId) =>
         this.CallAsync<object>(HttpMethod.Post, $"/room/{code}/leave", new { clientId });
