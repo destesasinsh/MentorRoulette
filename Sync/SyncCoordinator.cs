@@ -623,10 +623,12 @@ internal sealed class SyncCoordinator
         if (!allReady)
             return;
 
-        Service.Log.Info($"[Sync] auto loop: round {this.room.Round} -> {this.room.Round + 1}");
+        // 注意：本轮结束时已经发过 next（轮次 +1），这里只发 start。
+        // 之前多发一次 next，导致每打一轮轮次 +2，20 轮上限实际只能打 10 轮。
+        Service.Log.Info($"[Sync] auto loop: start round {this.room.Round}");
+        DiagLog.Add($"自动开始第 {this.room.Round} 轮");
         this.lastSignalAt = DateTime.UtcNow;
         this.roundClosed  = false;
-        _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "next");
         _ = this.client.SignalAsync(this.cfg.SyncRoomCode, this.cfg.SyncHostToken, "start");
     }
 
